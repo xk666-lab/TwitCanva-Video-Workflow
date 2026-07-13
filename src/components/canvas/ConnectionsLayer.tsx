@@ -7,6 +7,7 @@
 
 import React from 'react';
 import { NodeData, NodeStatus, NodeType, Viewport } from '../../types';
+import type { CanvasEdge } from '../../domain/graph/graphTypes';
 import { calculateConnectionPath } from '../../utils/connectionHelpers';
 
 // ============================================================================
@@ -152,56 +153,63 @@ const getNodeHeight = (node: NodeData, parentNode?: NodeData): number => {
     return baseWidth / aspectRatio;
 };
 
-interface Connection {
-    parentId: string;
-    childId: string;
-}
-
 interface ConnectionsLayerProps {
     nodes: NodeData[];
+    edges: CanvasEdge[];
     viewport: Viewport;
     // Connection dragging state
     isDraggingConnection: boolean;
     connectionStart: { nodeId: string; handle: 'left' | 'right' } | null;
     tempConnectionEnd: { x: number; y: number } | null;
     // Selection
-    selectedConnection: Connection | null;
-    onEdgeClick: (e: React.MouseEvent, parentId: string, childId: string) => void;
+    selectedEdgeId: string | null;
+    onEdgeClick: (e: React.MouseEvent, edgeId: string) => void;
     canvasTheme?: 'dark' | 'light';
 }
 
 export const ConnectionsLayer: React.FC<ConnectionsLayerProps> = ({
     nodes,
+    edges,
     viewport,
     isDraggingConnection,
     connectionStart,
     tempConnectionEnd,
-    selectedConnection,
+    selectedEdgeId,
     onEdgeClick,
     canvasTheme = 'dark'
 }) => {
     // Render permanent connections between nodes
     const connections: React.ReactNode[] = [];
 
-    nodes.forEach(node => {
-        if (!node.parentIds || node.parentIds.length === 0) return;
+    edges.forEach((edge, edgeIndex) => {
+            const parent = nodes.find(node => node.id === edge.sourceNodeId);
+            const node = nodes.find(candidate => candidate.id === edge.targetNodeId);
+            if (!parent || !node) {
+                if (import.meta.env.DEV) {
+                    console.warn(`[ConnectionsLayer] Ignoring edge ${edge.id} because a node is missing.`);
+                }
+                return;
+            }
 
-        node.parentIds.forEach(parentId => {
-            const parent = nodes.find(n => n.id === parentId);
-            if (!parent) return;
-
+            const parallelEdges = edges.filter(candidate =>
+                candidate.sourceNodeId === edge.sourceNodeId && candidate.targetNodeId === edge.targetNodeId
+            );
+            const parallelIndex = parallelEdges.findIndex(candidate => candidate.id === edge.id);
+            const offset = parallelEdges.length > 1
+                ? (parallelIndex - (parallelEdges.length - 1) / 2) * 6
+                : 0;
             const startX = parent.x + getNodeWidth(parent);
-            const startY = parent.y + getNodeHeight(parent) / 2;
+            const startY = parent.y + getNodeHeight(parent) / 2 + offset;
             const endX = node.x;
-            const endY = node.y + getNodeHeight(node, parent) / 2;
+            const endY = node.y + getNodeHeight(node, parent) / 2 + offset;
 
             const path = calculateConnectionPath(startX, startY, endX, endY, 'right');
-            const isSelected = selectedConnection?.parentId === parentId && selectedConnection?.childId === node.id;
+            const isSelected = selectedEdgeId === edge.id;
 
             connections.push(
                 <g
-                    key={`${parent.id}-${node.id}`}
-                    onClick={(e) => onEdgeClick(e, parent.id, node.id)}
+                    key={edge.id || `${parent.id}-${node.id}-${edgeIndex}`}
+                    onClick={(e) => onEdgeClick(e, edge.id)}
                     className="cursor-pointer group pointer-events-auto"
                 >
                     <path d={path} stroke="transparent" strokeWidth="20" fill="none" />
@@ -216,7 +224,6 @@ export const ConnectionsLayer: React.FC<ConnectionsLayerProps> = ({
                     />
                 </g>
             );
-        });
     });
 
     // Render temporary drag connection

@@ -8,7 +8,7 @@
 import React from 'react';
 import { NodeData, NodeType, NodeStatus } from '../types';
 import { generateCameraAngle } from '../services/cameraAngleService';
-import { DEFAULT_SEEDANCE_VIDEO_MODEL_ID } from '../utils/videoModelRouting';
+import { createDefaultNodeData } from '../domain/nodes/nodeRegistry';
 
 // ============================================================================
 // TYPES
@@ -45,16 +45,12 @@ export const useImageNodeHandlers = ({
         const NODE_WIDTH = 340;
 
         const newImageNode: NodeData = {
+            ...createDefaultNodeData(NodeType.IMAGE),
             id: newNodeId,
-            type: NodeType.IMAGE,
             x: imageNode.x + NODE_WIDTH + GAP,
             y: imageNode.y,
-            prompt: '',
-            status: NodeStatus.IDLE,
             model: imageNode.imageModel || 'gpt-image-2',
             imageModel: imageNode.imageModel || 'gpt-image-2',
-            aspectRatio: 'Auto',
-            resolution: 'Auto',
             parentIds: [nodeId] // Connect to the source image node
         };
 
@@ -77,16 +73,10 @@ export const useImageNodeHandlers = ({
         const NODE_WIDTH = 340;
 
         const newVideoNode: NodeData = {
+            ...createDefaultNodeData(NodeType.VIDEO),
             id: newNodeId,
-            type: NodeType.VIDEO,
             x: imageNode.x + NODE_WIDTH + GAP,
             y: imageNode.y,
-            prompt: '',
-            status: NodeStatus.IDLE,
-            model: DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
-            videoModel: DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
-            aspectRatio: 'Auto',
-            resolution: 'Auto',
             parentIds: [nodeId] // Connect to the source image node
         };
 
@@ -117,8 +107,8 @@ export const useImageNodeHandlers = ({
 
         // Create placeholder node in LOADING state
         const newImageNode: NodeData = {
+            ...createDefaultNodeData(NodeType.CAMERA_ANGLE),
             id: newNodeId,
-            type: NodeType.CAMERA_ANGLE,
             x: imageNode.x + NODE_WIDTH + GAP,
             y: imageNode.y,
             // Prompt is stored for reference but not displayed in the specialized node

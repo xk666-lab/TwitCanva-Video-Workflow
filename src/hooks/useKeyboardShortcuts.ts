@@ -10,12 +10,12 @@ import { NodeData, ContextMenuState } from '../types';
 interface UseKeyboardShortcutsOptions {
     nodes: NodeData[];
     selectedNodeIds: string[];
-    selectedConnection: { parentId: string; childId: string } | null;
+    selectedEdgeId: string | null;
     setNodes: React.Dispatch<React.SetStateAction<NodeData[]>>;
     setSelectedNodeIds: React.Dispatch<React.SetStateAction<string[]>>;
     setContextMenu: React.Dispatch<React.SetStateAction<ContextMenuState>>;
     deleteNodes: (ids: string[]) => void;
-    deleteSelectedConnection: (setNodes: React.Dispatch<React.SetStateAction<NodeData[]>>) => void;
+    deleteSelectedConnection: () => void;
     clearSelection: () => void;
     clearSelectionBox: () => void;
     undo: () => void;
@@ -25,7 +25,7 @@ interface UseKeyboardShortcutsOptions {
 export const useKeyboardShortcuts = ({
     nodes,
     selectedNodeIds,
-    selectedConnection,
+    selectedEdgeId,
     setNodes,
     setSelectedNodeIds,
     setContextMenu,
@@ -128,8 +128,8 @@ export const useKeyboardShortcuts = ({
                 if (selectedNodeIds.length > 0) {
                     deleteNodes(selectedNodeIds);
                     setContextMenu(prev => ({ ...prev, isOpen: false }));
-                } else if (selectedConnection) {
-                    deleteSelectedConnection(setNodes);
+                } else if (selectedEdgeId) {
+                    deleteSelectedConnection();
                 }
             } else if (e.key === 'Escape') {
                 clearSelection();
@@ -141,7 +141,7 @@ export const useKeyboardShortcuts = ({
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [
         selectedNodeIds,
-        selectedConnection,
+        selectedEdgeId,
         deleteNodes,
         deleteSelectedConnection,
         clearSelection,

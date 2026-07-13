@@ -8,23 +8,17 @@
 import React, { useState, useCallback, Dispatch, SetStateAction } from 'react';
 import { NodeData, NodeGroup, Viewport } from '../types';
 import { apiGet, apiPost } from '../services/apiClient';
-import { normalizeLegacyNodeTakes } from '../utils/takeHelpers';
-import { normalizeWorkflowNode } from '../utils/nodeTypeHelpers';
-
-interface WorkflowData {
-    id: string | null;
-    title: string;
-    nodes: NodeData[];
-    groups: NodeGroup[];
-    viewport: Viewport;
-}
+import { createWorkflowData } from '../domain/workflow/workflowSchema';
+import { migrateWorkflow } from '../domain/workflow/migrateWorkflow';
+import type { CanvasEdge } from '../domain/graph/graphTypes';
 
 interface UseWorkflowOptions {
     nodes: NodeData[];
+    edges: CanvasEdge[];
     groups: NodeGroup[];
     viewport: Viewport;
     canvasTitle: string;
-    setNodes: Dispatch<SetStateAction<NodeData[]>>;
+    replaceGraph: (nodes: NodeData[], edges: CanvasEdge[]) => void;
     setGroups: Dispatch<SetStateAction<NodeGroup[]>>;
     setSelectedNodeIds: Dispatch<SetStateAction<string[]>>;
     setCanvasTitle: (title: string) => void;
@@ -34,10 +28,11 @@ interface UseWorkflowOptions {
 
 export const useWorkflow = ({
     nodes,
+    edges,
     groups,
     viewport,
     canvasTitle,
-    setNodes,
+    replaceGraph,
     setGroups,
     setSelectedNodeIds,
     setCanvasTitle,
@@ -50,13 +45,14 @@ export const useWorkflow = ({
 
     const handleSaveWorkflow = useCallback(async () => {
         try {
-            const workflow: WorkflowData = {
+            const workflow = createWorkflowData({
                 id: workflowId,
                 title: canvasTitle,
                 nodes,
+                edges,
                 groups,
                 viewport
-            };
+            });
 
             const result = await apiPost<{ id: string }>('/api/workflows', workflow);
             setWorkflowId(result.id);
@@ -64,7 +60,7 @@ export const useWorkflow = ({
         } catch (error) {
             console.error('Failed to save workflow:', error);
         }
-    }, [workflowId, canvasTitle, nodes, groups, viewport]);
+    }, [workflowId, canvasTitle, nodes, edges, groups, viewport]);
 
     const handleLoadWorkflow = useCallback(async (id: string): Promise<{ nodeCount: number; title: string } | null> => {
         try {
@@ -74,13 +70,14 @@ export const useWorkflow = ({
                 ? `/api/public-workflows/${targetWorkflowId}`
                 : `/api/workflows/${targetWorkflowId}`;
 
-            const workflow = await apiGet<WorkflowData>(endpoint);
+            const rawWorkflow = await apiGet<unknown>(endpoint);
+            const workflow = migrateWorkflow(rawWorkflow);
             const title = workflow.title || '未命名';
 
             setWorkflowId(isPublic ? null : workflow.id);
             setCanvasTitle(title);
             setEditingTitleValue(title);
-            setNodes((workflow.nodes || []).map(node => normalizeLegacyNodeTakes(normalizeWorkflowNode(node))));
+            replaceGraph(workflow.nodes, workflow.edges);
             setGroups(workflow.groups || []);
             setSelectedNodeIds([]);
             setIsWorkflowPanelOpen(false);
@@ -94,7 +91,7 @@ export const useWorkflow = ({
             console.error('Failed to load workflow:', error);
         }
         return null;
-    }, [setNodes, setGroups, setSelectedNodeIds, setCanvasTitle, setEditingTitleValue]);
+    }, [replaceGraph, setGroups, setSelectedNodeIds, setCanvasTitle, setEditingTitleValue]);
 
     const handleWorkflowsClick = useCallback((e: React.MouseEvent) => {
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();

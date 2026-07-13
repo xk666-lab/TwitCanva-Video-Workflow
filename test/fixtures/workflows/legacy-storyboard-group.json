@@ -1,0 +1,40 @@
+{
+  "id": "legacy-storyboard",
+  "title": "Legacy Storyboard",
+  "nodes": [
+    {
+      "id": "scene-1",
+      "type": "Image",
+      "x": 0,
+      "y": 0,
+      "prompt": "scene one",
+      "status": "idle",
+      "model": "gpt-image-2",
+      "imageModel": "gpt-image-2",
+      "aspectRatio": "16:9",
+      "resolution": "1K",
+      "groupId": "storyboard-group"
+    }
+  ],
+  "groups": [
+    {
+      "id": "storyboard-group",
+      "nodeIds": ["scene-1"],
+      "label": "Storyboard",
+      "storyContext": {
+        "story": "A tiny adventure",
+        "scripts": [
+          {
+            "sceneNumber": 1,
+            "description": "The opening scene",
+            "cameraAngle": "wide",
+            "mood": "hopeful"
+          }
+        ],
+        "sceneCount": 1,
+        "selectedImageModel": "gpt-image-2"
+      }
+    }
+  ],
+  "viewport": { "x": 0, "y": 0, "zoom": 1 }
+}

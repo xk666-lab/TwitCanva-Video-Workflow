@@ -8,6 +8,7 @@
 import { useState, useCallback } from 'react';
 import { NodeData, NodeType, NodeStatus } from '../types';
 import { TikTokVideoInfo } from '../components/modals/TikTokImportModal';
+import { createDefaultNodeData } from '../domain/nodes/nodeRegistry';
 
 // ============================================================================
 // TYPES
@@ -65,8 +66,8 @@ export const useTikTokImport = ({
 
         // Create new video node
         const newNode: NodeData = {
+            ...createDefaultNodeData(NodeType.VIDEO),
             id: Date.now().toString(),
-            type: NodeType.VIDEO,
             x: centerX,
             y: centerY,
             prompt: prompt,

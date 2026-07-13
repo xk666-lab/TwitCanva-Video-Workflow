@@ -36,6 +36,7 @@ import { useAutoSave } from './hooks/useAutoSave';
 import { useGenerationRecovery } from './hooks/useGenerationRecovery';
 import { useVideoFrameExtraction } from './hooks/useVideoFrameExtraction';
 import { appendHeroTake } from './utils/takeHelpers';
+import { createDefaultNodeData } from './domain/nodes/nodeRegistry';
 import { extractVideoLastFrame } from './utils/videoHelpers';
 import { SelectionBoundingBox } from './components/canvas/SelectionBoundingBox';
 import { WorkflowPanel } from './components/WorkflowPanel';
@@ -54,7 +55,7 @@ import { useStoryboardGenerator } from './hooks/useStoryboardGenerator';
 import { StoryboardGeneratorModal } from './components/modals/StoryboardGeneratorModal';
 import { StoryboardVideoModal } from './components/modals/StoryboardVideoModal';
 import { getStoryboardVideoReadiness } from './utils/storyboardFlow';
-import { DEFAULT_SEEDANCE_VIDEO_MODEL_ID, isSeedanceVideoModel } from './utils/videoModelRouting';
+import { isSeedanceVideoModel } from './utils/videoModelRouting';
 
 // ============================================================================
 // MAIN COMPONENT
@@ -148,12 +149,16 @@ export default function App() {
   const {
     nodes,
     setNodes,
+    edges,
     selectedNodeIds,
     setSelectedNodeIds,
     addNode,
     updateNode,
     deleteNode,
     deleteNodes,
+    removeEdge,
+    replaceGraph,
+    validateAndAddEdge,
     clearSelection,
     handleSelectTypeFromMenu
   } = useNodeManagement();
@@ -163,8 +168,10 @@ export default function App() {
     connectionStart,
     tempConnectionEnd,
     hoveredNodeId: connectionHoveredNodeId,
-    selectedConnection,
-    setSelectedConnection,
+    selectedEdgeId,
+    setSelectedEdgeId,
+    connectionError,
+    reportConnectionError,
     handleConnectorPointerDown,
     updateConnectionDrag,
     completeConnectionDrag,
@@ -211,7 +218,7 @@ export default function App() {
     pushHistory,
     canUndo,
     canRedo
-  } = useHistory({ nodes, groups }, 50);
+  } = useHistory({ nodes, edges, groups }, 50);
 
   // Workflow management
   const {
@@ -225,10 +232,11 @@ export default function App() {
     resetWorkflowId
   } = useWorkflow({
     nodes,
+    edges,
     groups,
     viewport,
     canvasTitle,
-    setNodes,
+    replaceGraph,
     setGroups,
     setSelectedNodeIds,
     setCanvasTitle,
@@ -243,7 +251,13 @@ export default function App() {
   const [isDirty, setIsDirty] = React.useState(false);
   const hasUnsavedChanges = isDirty && nodes.length > 0;
 
-  // Mark as dirty when nodes or title change
+  React.useEffect(() => {
+    if (selectedEdgeId && !edges.some(edge => edge.id === selectedEdgeId)) {
+      setSelectedEdgeId(null);
+    }
+  }, [edges, selectedEdgeId, setSelectedEdgeId]);
+
+  // Mark as dirty when nodes, edges, or title change
   const isInitialMount = React.useRef(true);
   const lastLoadingCountRef = React.useRef(0);
   const ignoreNextChange = React.useRef(false);
@@ -268,7 +282,7 @@ export default function App() {
       handleSaveWithTracking();
     }
     lastLoadingCountRef.current = currentLoadingCount;
-  }, [nodes, canvasTitle]);
+  }, [nodes, edges, canvasTitle]);
 
   // Update saved state after workflow save
   const handleSaveWithTracking = async () => {
@@ -280,11 +294,13 @@ export default function App() {
   const handleLoadWithTracking = async (id: string) => {
     ignoreNextChange.current = true;
     await handleLoadWorkflow(id);
+    setSelectedEdgeId(null);
     setIsDirty(false);
   };
 
   const { handleGenerate } = useGeneration({
     nodes,
+    edges,
     updateNode
   });
 
@@ -298,6 +314,7 @@ export default function App() {
   const handleNewCanvas = () => {
     ignoreNextChange.current = true;
     setNodes([]);
+    setSelectedEdgeId(null);
     setGroups([]); // Reset groups for new canvas
     setSelectedNodeIds([]);
     setCanvasTitle('未命名画布');
@@ -360,6 +377,10 @@ export default function App() {
     handleContextUpload
   } = useAssetHandlers({ nodes, viewport, contextMenu, setNodes });
 
+  const handleDeleteSelectedConnection = React.useCallback(() => {
+    deleteSelectedConnection(removeEdge);
+  }, [deleteSelectedConnection, removeEdge]);
+
   // Keyboard shortcuts (copy/paste/delete/undo/redo)
   const {
     handleCopy,
@@ -368,12 +389,12 @@ export default function App() {
   } = useKeyboardShortcuts({
     nodes,
     selectedNodeIds,
-    selectedConnection,
+    selectedEdgeId,
     setNodes,
     setSelectedNodeIds,
     setContextMenu,
     deleteNodes,
-    deleteSelectedConnection,
+    deleteSelectedConnection: handleDeleteSelectedConnection,
     clearSelection,
     clearSelectionBox,
     undo,
@@ -426,22 +447,18 @@ export default function App() {
     }
   ) => {
     console.log('[Storyboard] handleCreateStoryboardNodes called with', newNodeData.length, 'nodes, groupInfo:', !!groupInfo);
-    const newNodes: NodeData[] = newNodeData.map(data => ({
-      id: data.id || crypto.randomUUID(),
-      type: data.type || NodeType.IMAGE,
-      x: data.x || 0,
-      y: data.y || 0,
-      prompt: data.prompt || '',
-      status: data.status || NodeStatus.IDLE,
-      model: data.model || data.imageModel || 'gpt-image-2',
-      imageModel: data.imageModel || 'gpt-image-2',
-      aspectRatio: data.aspectRatio || '16:9',
-      resolution: data.resolution || '1K',
-      title: data.title,
-      parentIds: data.parentIds || [],
-      groupId: data.groupId,
-      characterReferenceUrls: data.characterReferenceUrls
-    }));
+    const newNodes: NodeData[] = newNodeData.map(data => {
+      const type = data.type || NodeType.IMAGE;
+      return {
+        ...createDefaultNodeData(type),
+        ...data,
+        id: data.id || crypto.randomUUID(),
+        type,
+        x: data.x ?? 0,
+        y: data.y ?? 0,
+        parentIds: data.parentIds || []
+      };
+    });
 
     setNodes(prev => [...prev, ...newNodes]);
 
@@ -583,8 +600,8 @@ export default function App() {
       const PROMPT = prompts[sourceNode.id] || sourceNode.prompt || 'Animated video';
 
       const newVideoNode: NodeData = {
+        ...createDefaultNodeData(NodeType.VIDEO),
         id: newNodeId,
-        type: NodeType.VIDEO,
         // Clone the layout pattern but shifted to the right
         x: sourceNode.x + xOffset,
         y: sourceNode.y,
@@ -663,7 +680,8 @@ export default function App() {
     contextMenu,
     setContextMenu,
     handleOpenCreateAsset,
-    handleSelectTypeFromMenu
+    handleSelectTypeFromMenu,
+    onConnectionError: reportConnectionError
   });
 
   // Wrapper functions that pass closeWorkflowPanel to panel handlers
@@ -732,13 +750,14 @@ export default function App() {
     // Create node with detected aspect ratio
     const createNode = (resultAspectRatio?: string, aspectRatio?: string) => {
       const isVideo = type === 'videos';
+      const nodeType = isVideo ? NodeType.VIDEO : NodeType.IMAGE;
+      const defaults = createDefaultNodeData(nodeType);
       // Use the original model from asset metadata, or fall back to defaults
-      const defaultModel = isVideo ? DEFAULT_SEEDANCE_VIDEO_MODEL_ID : 'gpt-image-2';
-      const nodeModel = model || defaultModel;
+      const nodeModel = model || defaults.model;
 
       const newNode: NodeData = {
+        ...defaults,
         id: Date.now().toString(),
-        type: isVideo ? NodeType.VIDEO : NodeType.IMAGE,
         x: centerX,
         y: centerY,
         prompt: prompt,
@@ -837,9 +856,9 @@ export default function App() {
       return;
     }
 
-    // Push to history when nodes or groups change
-    pushHistory({ nodes, groups });
-  }, [nodes, groups, isDragging]);
+    // Push graph state to history when nodes, edges, or groups change
+    pushHistory({ nodes, edges, groups });
+  }, [nodes, edges, groups, isDragging, pushHistory]);
 
   // Apply history state when undo/redo is triggered
   // IMPORTANT: Don't revert nodes if any node is in LOADING status (generation in progress)
@@ -850,11 +869,12 @@ export default function App() {
       return;
     }
 
-    if (historyState.nodes !== nodes) {
+    if (historyState.nodes !== nodes || historyState.edges !== edges || historyState.groups !== groups) {
       isApplyingHistory.current = true;
-      setNodes(historyState.nodes);
+      replaceGraph(historyState.nodes, historyState.edges);
+      setGroups(historyState.groups);
     }
-  }, [historyState]);
+  }, [historyState, nodes, edges, groups, replaceGraph, setGroups]);
 
   // Simple wrapper for updateNode (sync code removed - TEXT node prompts are combined at generation time)
   const updateNodeWithSync = React.useCallback((id: string, updates: Partial<NodeData>) => {
@@ -871,7 +891,7 @@ export default function App() {
       if (e.button === 0) {
         startSelection(e);
         clearSelection();
-        setSelectedConnection(null);
+        setSelectedEdgeId(null);
         setContextMenu(prev => ({ ...prev, isOpen: false }));
         closeWorkflowPanel();
         closeHistoryPanel();
@@ -880,7 +900,7 @@ export default function App() {
       // Middle-click (button 1) or other: Start panning
       else {
         startPanning(e);
-        setSelectedConnection(null);
+        setSelectedEdgeId(null);
         setContextMenu(prev => ({ ...prev, isOpen: false }));
       }
     }
@@ -927,7 +947,7 @@ export default function App() {
     }
 
     // 2. Handle Connection Drop
-    if (completeConnectionDrag(handleAddNext, setNodes, nodes, handleConnectionMade)) {
+    if (completeConnectionDrag(handleAddNext, validateAndAddEdge, handleConnectionMade)) {
       releasePointerCapture(e);
       return;
     }
@@ -1072,6 +1092,12 @@ export default function App() {
         />
       )}
 
+      {connectionError && (
+        <div className="fixed left-1/2 top-20 z-[120] -translate-x-1/2 rounded-xl border border-red-500/30 bg-red-950/95 px-4 py-2 text-sm text-red-100 shadow-2xl">
+          {connectionError}
+        </div>
+      )}
+
       {/* Canvas */}
       <div
         ref={canvasRef}
@@ -1109,12 +1135,13 @@ export default function App() {
           <svg className="absolute top-0 left-0 w-full h-full overflow-visible pointer-events-none z-0">
             <ConnectionsLayer
               nodes={nodes}
+              edges={edges}
               viewport={viewport}
               canvasTheme={canvasTheme}
               isDraggingConnection={isDraggingConnection}
               connectionStart={connectionStart}
               tempConnectionEnd={tempConnectionEnd}
-              selectedConnection={selectedConnection}
+              selectedEdgeId={selectedEdgeId}
               onEdgeClick={handleEdgeClick}
             />
           </svg>
@@ -1359,8 +1386,8 @@ export default function App() {
           // Create N nodes with inherited settings
           for (let i = 0; i < count; i++) {
             newNodes.push({
+              ...createDefaultNodeData(NodeType.IMAGE),
               id: crypto.randomUUID(),
-              type: NodeType.IMAGE,
               x: startX,
               y: startY + startYOffset + (i * yStep),
               prompt: prompt,

@@ -1,0 +1,27 @@
+{
+  "id": "future-workflow",
+  "title": "Future Workflow",
+  "futureRoot": { "enabled": true },
+  "nodes": [
+    {
+      "id": "future-1",
+      "type": "Future Node",
+      "x": 5,
+      "futureNode": { "version": 7 }
+    }
+  ],
+  "groups": [
+    {
+      "id": "future-group",
+      "nodeIds": ["future-1"],
+      "label": "Future",
+      "futureGroup": "kept"
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1,
+    "futureViewport": "kept"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "id": "legacy-image",
+  "title": "Legacy Image",
+  "nodes": [
+    {
+      "id": "image-1",
+      "type": "Image",
+      "x": 0,
+      "y": 0,
+      "prompt": "legacy prompt",
+      "status": "success",
+      "resultUrl": "/library/images/legacy.png",
+      "model": "gpt-image-2",
+      "imageModel": "gpt-image-2",
+      "aspectRatio": "16:9",
+      "resolution": "1K"
+    }
+  ],
+  "groups": [],
+  "viewport": { "x": 0, "y": 0, "zoom": 1 }
+}

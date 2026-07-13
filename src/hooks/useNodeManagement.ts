@@ -5,29 +5,117 @@
  * Handles node creation, updates, selection, and deletion.
  */
 
-import { useState } from 'react';
-import { NodeData, NodeType, NodeStatus, Viewport } from '../types';
-import { DEFAULT_SEEDANCE_VIDEO_MODEL_ID } from '../utils/videoModelRouting';
+import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { NodeData, NodeType, Viewport } from '../types';
+import { createDefaultNodeData } from '../domain/nodes/nodeRegistry';
+import type { CanvasEdge, ConnectionValidationResult } from '../domain/graph/graphTypes';
+import { CURRENT_EDGE_SCHEMA_VERSION } from '../domain/graph/graphTypes';
+import { resolveConnectionPorts, validateConnection } from '../domain/graph/connectionRules';
+import {
+    getIncomingEdges as selectIncomingEdges,
+    getInputEdgesByPort as selectInputEdgesByPort,
+    getOutgoingEdges as selectOutgoingEdges,
+    getOutputEdgesByPort as selectOutputEdgesByPort,
+    normalizeEdges,
+    reconcileEdgesFromLegacyNodeChanges,
+    removeEdgesForNode as withoutEdgesForNode,
+    syncLegacyParentIds
+} from '../domain/graph/edgeMigration';
 
-const defaultModelFields = (type: NodeType): Pick<NodeData, 'model'> & Partial<NodeData> => {
-    if (type === NodeType.IMAGE || type === NodeType.IMAGE_EDITOR) {
-        return { model: 'gpt-image-2', imageModel: 'gpt-image-2' };
-    }
-
-    if (type === NodeType.VIDEO || type === NodeType.VIDEO_EDITOR) {
-        return { model: DEFAULT_SEEDANCE_VIDEO_MODEL_ID, videoModel: DEFAULT_SEEDANCE_VIDEO_MODEL_ID };
-    }
-
-    return { model: 'Banana Pro' };
-};
+export type ValidateAndAddEdgeResult = ConnectionValidationResult & { edge?: CanvasEdge };
 
 export const useNodeManagement = () => {
     // ============================================================================
     // STATE
     // ============================================================================
 
-    const [nodes, setNodes] = useState<NodeData[]>([]);
+    const [nodes, setNodeState] = useState<NodeData[]>([]);
+    const [edges, setEdgeState] = useState<CanvasEdge[]>([]);
     const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+    const nodesRef = useRef<NodeData[]>(nodes);
+    const edgesRef = useRef<CanvasEdge[]>(edges);
+
+    nodesRef.current = nodes;
+    edgesRef.current = edges;
+
+    const commitGraph = useCallback((nextNodes: NodeData[], nextEdges: CanvasEdge[]) => {
+        nodesRef.current = nextNodes;
+        edgesRef.current = nextEdges;
+        setNodeState(nextNodes);
+        setEdgeState(nextEdges);
+    }, []);
+
+    const setNodes: Dispatch<SetStateAction<NodeData[]>> = useCallback((action) => {
+        const previousNodes = nodesRef.current;
+        const requestedNodes = typeof action === 'function' ? action(previousNodes) : action;
+        const nextEdges = reconcileEdgesFromLegacyNodeChanges(previousNodes, requestedNodes, edgesRef.current);
+        commitGraph(syncLegacyParentIds(requestedNodes, nextEdges), nextEdges);
+    }, [commitGraph]);
+
+    const setEdges: Dispatch<SetStateAction<CanvasEdge[]>> = useCallback((action) => {
+        const requestedEdges = typeof action === 'function' ? action(edgesRef.current) : action;
+        const nextEdges = normalizeEdges(requestedEdges, nodesRef.current);
+        commitGraph(syncLegacyParentIds(nodesRef.current, nextEdges), nextEdges);
+    }, [commitGraph]);
+
+    const replaceGraph = useCallback((nextNodes: NodeData[], nextEdges: CanvasEdge[]) => {
+        const normalizedEdges = normalizeEdges(nextEdges, nextNodes);
+        commitGraph(syncLegacyParentIds(nextNodes, normalizedEdges), normalizedEdges);
+    }, [commitGraph]);
+
+    const addEdge = useCallback((edge: CanvasEdge) => {
+        const nextEdges = normalizeEdges([...edgesRef.current, edge], nodesRef.current);
+        commitGraph(syncLegacyParentIds(nodesRef.current, nextEdges), nextEdges);
+    }, [commitGraph]);
+
+    const removeEdge = useCallback((edgeId: string) => {
+        const nextEdges = edgesRef.current.filter(edge => edge.id !== edgeId);
+        commitGraph(syncLegacyParentIds(nodesRef.current, nextEdges), nextEdges);
+    }, [commitGraph]);
+
+    const removeEdgesForNode = useCallback((nodeId: string) => {
+        const nextEdges = withoutEdgesForNode(edgesRef.current, nodeId);
+        commitGraph(syncLegacyParentIds(nodesRef.current, nextEdges), nextEdges);
+    }, [commitGraph]);
+
+    const replaceEdges = useCallback((nextEdges: CanvasEdge[]) => {
+        const normalizedEdges = normalizeEdges(nextEdges, nodesRef.current);
+        commitGraph(syncLegacyParentIds(nodesRef.current, normalizedEdges), normalizedEdges);
+    }, [commitGraph]);
+
+    const validateAndAddEdge = useCallback((sourceNodeId: string, targetNodeId: string): ValidateAndAddEdgeResult => {
+        const sourceNode = nodesRef.current.find(node => node.id === sourceNodeId);
+        const targetNode = nodesRef.current.find(node => node.id === targetNodeId);
+        const resolution = resolveConnectionPorts(sourceNode, targetNode, edgesRef.current);
+        if (!resolution.valid) return resolution;
+
+        const validation = validateConnection({
+            sourceNode,
+            sourcePort: resolution.sourcePort,
+            targetNode,
+            targetPort: resolution.targetPort,
+            existingEdges: edgesRef.current
+        });
+        if (!validation.valid || !sourceNode || !targetNode) return validation;
+
+        const portEdges = selectInputEdgesByPort(edgesRef.current, targetNodeId, resolution.targetPort.id);
+        const nextOrder = resolution.targetPort.ordered
+            ? Math.max(-1, ...portEdges.map(edge => edge.order ?? -1)) + 1
+            : undefined;
+        const edge: CanvasEdge = {
+            schemaVersion: CURRENT_EDGE_SCHEMA_VERSION,
+            id: crypto.randomUUID(),
+            sourceNodeId,
+            sourcePortId: resolution.sourcePort.id,
+            targetNodeId,
+            targetPortId: resolution.targetPort.id,
+            dataType: resolution.sourcePort.dataType,
+            ...(nextOrder !== undefined ? { order: nextOrder } : {}),
+            createdAt: new Date().toISOString()
+        };
+        addEdge(edge);
+        return { valid: true, edge };
+    }, [addEdge]);
 
     // ============================================================================
     // NODE OPERATIONS
@@ -52,15 +140,10 @@ export const useNodeManagement = () => {
         const canvasY = (y - viewport.y) / viewport.zoom;
 
         const newNode: NodeData = {
+            ...createDefaultNodeData(type),
             id: crypto.randomUUID(),
-            type,
             x: parentId ? canvasX : canvasX - 170,
             y: parentId ? canvasY : canvasY - 100,
-            prompt: '',
-            status: NodeStatus.IDLE,
-            ...defaultModelFields(type),
-            aspectRatio: 'Auto',
-            resolution: 'Auto',
             parentIds: parentId ? [parentId] : []
         };
 
@@ -112,7 +195,8 @@ export const useNodeManagement = () => {
         type: NodeType | 'DELETE',
         contextMenu: any,
         viewport: Viewport,
-        onCloseMenu: () => void
+        onCloseMenu: () => void,
+        onConnectionError?: (message: string) => void
     ) => {
         // Handle Delete Action
         if (type === 'DELETE') {
@@ -136,37 +220,33 @@ export const useNodeManagement = () => {
                 if (direction === 'right') {
                     // Append: Source -> New
                     newNode = {
+                        ...createDefaultNodeData(type),
                         id: newNodeId,
-                        type,
                         x: sourceNode.x + NODE_WIDTH + GAP,
                         y: sourceNode.y,
-                        prompt: '',
-                        status: NodeStatus.IDLE,
-                        ...defaultModelFields(type),
-                        aspectRatio: 'Auto',
-                        resolution: 'Auto',
-                        parentIds: contextMenu.sourceNodeId ? [contextMenu.sourceNodeId] : []
+                        parentIds: []
                     };
                 } else {
                     // Prepend: New -> Source
                     newNode = {
+                        ...createDefaultNodeData(type),
                         id: newNodeId,
-                        type,
                         x: sourceNode.x - NODE_WIDTH - GAP,
                         y: sourceNode.y,
-                        prompt: '',
-                        status: NodeStatus.IDLE,
-                        ...defaultModelFields(type),
-                        aspectRatio: 'Auto',
-                        resolution: 'Auto',
                         parentIds: []
                     };
-                    // Update source to add new node as parent
-                    const existingParentIds = sourceNode.parentIds || [];
-                    updateNode(contextMenu.sourceNodeId, { parentIds: [...existingParentIds, newNodeId] });
                 }
 
                 setNodes(prev => [...prev, newNode]);
+                const parentId = direction === 'right' ? sourceNode.id : newNodeId;
+                const childId = direction === 'right' ? newNodeId : sourceNode.id;
+                const result = validateAndAddEdge(parentId, childId);
+                if (!result.valid) {
+                    setNodes(prev => prev.filter(node => node.id !== newNodeId));
+                    onConnectionError?.(result.message || '无法创建连接。');
+                    onCloseMenu();
+                    return;
+                }
                 setSelectedNodeIds([newNodeId]);
             }
         } else {
@@ -184,12 +264,24 @@ export const useNodeManagement = () => {
     return {
         nodes,
         setNodes,
+        edges,
+        setEdges,
         selectedNodeIds,
         setSelectedNodeIds,
         addNode,
         updateNode,
         deleteNode,
         deleteNodes,
+        addEdge,
+        removeEdge,
+        removeEdgesForNode,
+        replaceEdges,
+        replaceGraph,
+        getIncomingEdges: (nodeId: string) => selectIncomingEdges(edgesRef.current, nodeId),
+        getOutgoingEdges: (nodeId: string) => selectOutgoingEdges(edgesRef.current, nodeId),
+        getInputEdgesByPort: (nodeId: string, portId: string) => selectInputEdgesByPort(edgesRef.current, nodeId, portId),
+        getOutputEdgesByPort: (nodeId: string, portId: string) => selectOutputEdgesByPort(edgesRef.current, nodeId, portId),
+        validateAndAddEdge,
         clearSelection,
         handleSelectTypeFromMenu
     };

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 2,
+  "id": "takes-workflow",
+  "title": "Takes Workflow",
+  "nodes": [
+    {
+      "id": "image-with-takes",
+      "type": "图片",
+      "x": 0,
+      "y": 0,
+      "prompt": "two takes",
+      "status": "success",
+      "resultUrl": "/library/images/take-1.png",
+      "heroTakeId": "take-2",
+      "takes": [
+        {
+          "id": "take-1",
+          "nodeId": "image-with-takes",
+          "type": "image",
+          "url": "/library/images/take-1.png",
+          "prompt": "first",
+          "model": "gpt-image-2",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "isHero": false
+        },
+        {
+          "id": "take-2",
+          "nodeId": "image-with-takes",
+          "type": "image",
+          "url": "/library/images/take-2.png",
+          "prompt": "second",
+          "model": "gpt-image-2",
+          "createdAt": "2026-01-02T00:00:00.000Z",
+          "isHero": true
+        }
+      ],
+      "model": "gpt-image-2",
+      "imageModel": "gpt-image-2",
+      "aspectRatio": "16:9",
+      "resolution": "1K"
+    }
+  ],
+  "groups": [],
+  "viewport": { "x": 0, "y": 0, "zoom": 1 }
+}

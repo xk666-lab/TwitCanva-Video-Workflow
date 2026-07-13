@@ -9,7 +9,7 @@
 import React, { useState, useCallback } from 'react';
 import { NodeData, NodeType, NodeStatus, Viewport, ContextMenuState } from '../types';
 import { apiPost } from '../services/apiClient';
-import { DEFAULT_SEEDANCE_VIDEO_MODEL_ID } from '../utils/videoModelRouting';
+import { createDefaultNodeData } from '../domain/nodes/nodeRegistry';
 
 interface UseAssetHandlersOptions {
     nodes: NodeData[];
@@ -89,18 +89,16 @@ export const useAssetHandlers = ({
         // Detect aspect ratio for images/videos
         const createNode = (resultAspectRatio?: string, aspectRatio?: string) => {
             const isVideo = type === 'videos';
+            const nodeType = isVideo ? NodeType.VIDEO : NodeType.IMAGE;
             const newNode: NodeData = {
+                ...createDefaultNodeData(nodeType),
                 id: Date.now().toString(),
-                type: isVideo ? NodeType.VIDEO : NodeType.IMAGE,
                 x: centerX,
                 y: centerY,
                 prompt: prompt,
                 status: NodeStatus.SUCCESS,
                 resultUrl: url,
                 resultAspectRatio,
-                model: isVideo ? DEFAULT_SEEDANCE_VIDEO_MODEL_ID : 'gpt-image-2',
-                videoModel: isVideo ? DEFAULT_SEEDANCE_VIDEO_MODEL_ID : undefined,
-                imageModel: isVideo ? undefined : 'gpt-image-2',
                 aspectRatio: aspectRatio || '16:9',
                 resolution: isVideo ? 'Auto' : '1024x1024'
             };
@@ -255,8 +253,8 @@ export const useAssetHandlers = ({
                     }
 
                     const newNode: NodeData = {
+                        ...createDefaultNodeData(isVideo ? NodeType.VIDEO : NodeType.IMAGE),
                         id: crypto.randomUUID(),
-                        type: isVideo ? NodeType.VIDEO : NodeType.IMAGE,
                         x: canvasX,
                         y: canvasY,
                         prompt: file.name,
@@ -264,8 +262,6 @@ export const useAssetHandlers = ({
                         resultUrl: resultUrl,
                         resultAspectRatio,
                         model: 'Upload',
-                        imageModel: isImage ? 'gpt-image-2' : undefined,
-                        videoModel: isVideo ? DEFAULT_SEEDANCE_VIDEO_MODEL_ID : undefined,
                         aspectRatio,
                         resolution: 'Auto',
                     };

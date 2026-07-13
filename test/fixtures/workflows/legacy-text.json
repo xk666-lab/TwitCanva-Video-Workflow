@@ -1,0 +1,19 @@
+{
+  "id": "legacy-text",
+  "title": "Legacy Text",
+  "nodes": [
+    {
+      "id": "text-1",
+      "type": "Text",
+      "x": 10,
+      "y": 20,
+      "prompt": "hello",
+      "status": "idle",
+      "model": "Banana Pro",
+      "aspectRatio": "Auto",
+      "resolution": "Auto"
+    }
+  ],
+  "groups": [],
+  "viewport": { "x": 0, "y": 0, "zoom": 1 }
+}

@@ -5,8 +5,9 @@
  * Handles drag-to-connect functionality with visual feedback.
  */
 
-import React, { useState, useRef } from 'react';
-import { NodeData, NodeType, Viewport } from '../types';
+import React, { useEffect, useState, useRef } from 'react';
+import { NodeData, Viewport } from '../types';
+import type { ValidateAndAddEdgeResult } from './useNodeManagement';
 
 interface ConnectionStart {
     nodeId: string;
@@ -23,8 +24,28 @@ export const useConnectionDragging = () => {
     const [tempConnectionEnd, setTempConnectionEnd] = useState<{ x: number; y: number } | null>(null);
     const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
     const [hoveredSide, setHoveredSide] = useState<'left' | 'right' | null>(null);
-    const [selectedConnection, setSelectedConnection] = useState<{ parentId: string; childId: string } | null>(null);
+    const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+    const [connectionError, setConnectionError] = useState<string | null>(null);
     const dragStartTime = useRef<number>(0);
+    const errorTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(() => () => {
+        if (errorTimeout.current) clearTimeout(errorTimeout.current);
+    }, []);
+
+    const showConnectionError = (message: string) => {
+        setConnectionError(message);
+        if (errorTimeout.current) clearTimeout(errorTimeout.current);
+        errorTimeout.current = setTimeout(() => setConnectionError(null), 3500);
+    };
+
+    const resetConnectionDrag = () => {
+        setIsDraggingConnection(false);
+        setConnectionStart(null);
+        setTempConnectionEnd(null);
+        setHoveredNodeId(null);
+        setHoveredSide(null);
+    };
 
     // ============================================================================
     // HELPERS
@@ -83,6 +104,7 @@ export const useConnectionDragging = () => {
         e.stopPropagation();
         e.preventDefault();
         dragStartTime.current = Date.now();
+        setConnectionError(null);
         setIsDraggingConnection(true);
         setConnectionStart({ nodeId, handle: side });
         setTempConnectionEnd({ x: e.clientX, y: e.clientY });
@@ -106,83 +128,16 @@ export const useConnectionDragging = () => {
     /**
      * Completes connection drag and creates connection if valid
      * Returns true if connection was handled, false otherwise
-     * @param nodes - All nodes for validation
      * @param onConnectionMade - Optional callback called with (parentId, childId) when connection is created
      */
     const completeConnectionDrag = (
         onAddNext: (nodeId: string, direction: 'left' | 'right') => void,
-        onUpdateNodes: (updater: (prev: NodeData[]) => NodeData[]) => void,
-        nodes: NodeData[],
+        validateAndAddEdge: (sourceNodeId: string, targetNodeId: string) => ValidateAndAddEdgeResult,
         onConnectionMade?: (parentId: string, childId: string) => void
     ): boolean => {
         if (!isDraggingConnection || !connectionStart) return false;
 
         const dragDuration = Date.now() - dragStartTime.current;
-
-        /**
-         * Check if a connection is valid based on node types
-         * Rules:
-         * - IMAGE → IMAGE, VIDEO, IMAGE_EDITOR: ✅ (image as input)
-         * - VIDEO → VIDEO: ✅ (video chaining via lastFrame)
-         * - VIDEO → IMAGE, IMAGE_EDITOR: ❌ (can't generate image from video)
-         * - TEXT → IMAGE, VIDEO: ✅ (text provides prompt)
-         * - TEXT → TEXT, IMAGE_EDITOR: ❌ (no text chaining, no text editing)
-         * - Any → TEXT: ❌ (text nodes can't receive input)
-         * - AUDIO: ❌ (not supported yet)
-         */
-        const isValidConnection = (parentId: string, childId: string): boolean => {
-            const parentNode = nodes.find(n => n.id === parentId);
-            const childNode = nodes.find(n => n.id === childId);
-
-            if (!parentNode || !childNode) return false;
-
-            // AUDIO nodes not supported yet
-            if (parentNode.type === NodeType.AUDIO || childNode.type === NodeType.AUDIO) {
-                return false;
-            }
-
-            // STORYBOARD nodes - allow connections to/from for now (future feature)
-            // Can be restricted later when storyboard logic is implemented
-
-            // TEXT nodes can't receive input (can only be parents)
-            if (childNode.type === NodeType.TEXT) {
-                return false;
-            }
-
-            // TEXT nodes can only connect to IMAGE or VIDEO (to provide prompts)
-            if (parentNode.type === NodeType.TEXT) {
-                return childNode.type === NodeType.IMAGE || childNode.type === NodeType.VIDEO;
-            }
-
-            // VIDEO nodes can only connect to other VIDEO nodes (via lastFrame)
-            // Cannot connect to IMAGE or IMAGE_EDITOR
-            if (parentNode.type === NodeType.VIDEO) {
-                return childNode.type === NodeType.VIDEO ||
-                    childNode.type === NodeType.VIDEO_EDITOR;
-            }
-
-            // IMAGE nodes can connect to IMAGE, VIDEO, or IMAGE_EDITOR
-            if (parentNode.type === NodeType.IMAGE) {
-                return childNode.type === NodeType.IMAGE ||
-                    childNode.type === NodeType.VIDEO ||
-                    childNode.type === NodeType.IMAGE_EDITOR;
-            }
-
-            // IMAGE_EDITOR can connect to IMAGE, VIDEO, or IMAGE_EDITOR
-            if (parentNode.type === NodeType.IMAGE_EDITOR) {
-                return childNode.type === NodeType.IMAGE ||
-                    childNode.type === NodeType.VIDEO ||
-                    childNode.type === NodeType.IMAGE_EDITOR;
-            }
-
-            // VIDEO_EDITOR can only connect to VIDEO (to feed trimmed video for generation)
-            // No chaining VIDEO_EDITOR → VIDEO_EDITOR
-            if (parentNode.type === NodeType.VIDEO_EDITOR) {
-                return childNode.type === NodeType.VIDEO;
-            }
-
-            return true;
-        };
 
         // Short click - open menu
         if (dragDuration < 200 && !hoveredNodeId) {
@@ -193,89 +148,48 @@ export const useConnectionDragging = () => {
             if (hoveredSide === 'left') {
                 // Connecting to LEFT connector = target receives input (target is child)
                 // source is parent, hoveredNode is child
-                if (!isValidConnection(connectionStart.nodeId, hoveredNodeId)) {
-                    // Invalid connection - reset and return
-                    setIsDraggingConnection(false);
-                    setConnectionStart(null);
-                    setTempConnectionEnd(null);
-                    setHoveredNodeId(null);
-                    setHoveredSide(null);
+                const result = validateAndAddEdge(connectionStart.nodeId, hoveredNodeId);
+                if (!result.valid) {
+                    showConnectionError(result.message || '无法创建连接。');
+                    resetConnectionDrag();
                     return true;
                 }
-
-                // Add source as a parent to target node
-                onUpdateNodes(prev => prev.map(n => {
-                    if (n.id === hoveredNodeId) {
-                        const existingParents = n.parentIds || [];
-                        // Prevent duplicate connections
-                        if (!existingParents.includes(connectionStart.nodeId)) {
-                            return { ...n, parentIds: [...existingParents, connectionStart.nodeId] };
-                        }
-                    }
-                    return n;
-                }));
                 // Notify about new connection: source is parent, hoveredNode is child
                 onConnectionMade?.(connectionStart.nodeId, hoveredNodeId);
             } else {
                 // Connecting to RIGHT connector = target provides output (target is parent)
                 // hoveredNode is parent, source is child
-                if (!isValidConnection(hoveredNodeId, connectionStart.nodeId)) {
-                    // Invalid connection - reset and return
-                    setIsDraggingConnection(false);
-                    setConnectionStart(null);
-                    setTempConnectionEnd(null);
-                    setHoveredNodeId(null);
-                    setHoveredSide(null);
+                const result = validateAndAddEdge(hoveredNodeId, connectionStart.nodeId);
+                if (!result.valid) {
+                    showConnectionError(result.message || '无法创建连接。');
+                    resetConnectionDrag();
                     return true;
                 }
-
-                // Add target as a parent to source node
-                onUpdateNodes(prev => prev.map(n => {
-                    if (n.id === connectionStart.nodeId) {
-                        const existingParents = n.parentIds || [];
-                        // Prevent duplicate connections
-                        if (!existingParents.includes(hoveredNodeId)) {
-                            return { ...n, parentIds: [...existingParents, hoveredNodeId] };
-                        }
-                    }
-                    return n;
-                }));
                 // Notify about new connection: hoveredNode is parent, source is child
                 onConnectionMade?.(hoveredNodeId, connectionStart.nodeId);
             }
         }
 
         // Reset state
-        setIsDraggingConnection(false);
-        setConnectionStart(null);
-        setTempConnectionEnd(null);
-        setHoveredNodeId(null);
-        setHoveredSide(null);
+        resetConnectionDrag();
         return true;
     };
 
     /**
      * Handles clicking on a connection line to select it
      */
-    const handleEdgeClick = (e: React.MouseEvent, parentId: string, childId: string) => {
+    const handleEdgeClick = (e: React.MouseEvent, edgeId: string) => {
         e.stopPropagation();
-        setSelectedConnection({ parentId, childId });
+        setSelectedEdgeId(edgeId);
     };
 
     /**
      * Deletes the currently selected connection
      */
-    const deleteSelectedConnection = (onUpdateNodes: (updater: (prev: NodeData[]) => NodeData[]) => void) => {
-        if (!selectedConnection) return false;
-
-        onUpdateNodes(prev => prev.map(n => {
-            if (n.id === selectedConnection.childId) {
-                const existingParents = n.parentIds || [];
-                return { ...n, parentIds: existingParents.filter(pid => pid !== selectedConnection.parentId) };
-            }
-            return n;
-        }));
-        setSelectedConnection(null);
+    const deleteSelectedConnection = (removeEdge: (edgeId: string) => void) => {
+        if (!selectedEdgeId) return false;
+        removeEdge(selectedEdgeId);
+        setSelectedEdgeId(null);
         return true;
     };
 
@@ -288,8 +202,10 @@ export const useConnectionDragging = () => {
         connectionStart,
         tempConnectionEnd,
         hoveredNodeId,
-        selectedConnection,
-        setSelectedConnection,
+        selectedEdgeId,
+        setSelectedEdgeId,
+        connectionError,
+        reportConnectionError: showConnectionError,
         handleConnectorPointerDown,
         updateConnectionDrag,
         completeConnectionDrag,

@@ -7,6 +7,7 @@
 
 import React, { useCallback } from 'react';
 import { NodeData, NodeType, Viewport, ContextMenuState } from '../types';
+import type { ValidateAndAddEdgeResult } from './useNodeManagement';
 
 interface UsePointerHandlersOptions {
     nodes: NodeData[];
@@ -15,7 +16,7 @@ interface UsePointerHandlersOptions {
     isSelecting: boolean;
     setNodes: React.Dispatch<React.SetStateAction<NodeData[]>>;
     setSelectedNodeIds: React.Dispatch<React.SetStateAction<string[]>>;
-    setSelectedConnection: React.Dispatch<React.SetStateAction<{ parentId: string; childId: string } | null>>;
+    setSelectedEdgeId: React.Dispatch<React.SetStateAction<string | null>>;
     setContextMenu: React.Dispatch<React.SetStateAction<ContextMenuState>>;
     setViewport: React.Dispatch<React.SetStateAction<Viewport>>;
 
@@ -43,10 +44,10 @@ interface UsePointerHandlersOptions {
     updateConnectionDrag: (e: React.PointerEvent, nodes: NodeData[], viewport: Viewport) => boolean;
     completeConnectionDrag: (
         handleAddNext: (nodeId: string, direction: 'left' | 'right') => void,
-        setNodes: React.Dispatch<React.SetStateAction<NodeData[]>>,
-        nodes: NodeData[],
+        validateAndAddEdge: (sourceNodeId: string, targetNodeId: string) => ValidateAndAddEdgeResult,
         onConnectionMade?: (parentId: string, childId: string) => void
     ) => boolean;
+    validateAndAddEdge: (sourceNodeId: string, targetNodeId: string) => ValidateAndAddEdgeResult;
 
     // Panel close functions
     closeWorkflowPanel: () => void;
@@ -66,7 +67,7 @@ export const usePointerHandlers = ({
     isSelecting,
     setNodes,
     setSelectedNodeIds,
-    setSelectedConnection,
+    setSelectedEdgeId,
     setContextMenu,
     setViewport,
     startSelection,
@@ -80,6 +81,7 @@ export const usePointerHandlers = ({
     endNodeDrag,
     updateConnectionDrag,
     completeConnectionDrag,
+    validateAndAddEdge,
     closeWorkflowPanel,
     closeHistoryPanel,
     closeAssetLibrary,
@@ -112,7 +114,7 @@ export const usePointerHandlers = ({
             if (e.button === 0) {
                 startSelection(e);
                 clearSelection();
-                setSelectedConnection(null);
+                setSelectedEdgeId(null);
                 setContextMenu(prev => ({ ...prev, isOpen: false }));
                 closeWorkflowPanel();
                 closeHistoryPanel();
@@ -121,14 +123,14 @@ export const usePointerHandlers = ({
             // Middle-click (button 1) or other: Start panning
             else {
                 startPanning(e);
-                setSelectedConnection(null);
+                setSelectedEdgeId(null);
                 setContextMenu(prev => ({ ...prev, isOpen: false }));
             }
         }
     }, [
         startSelection,
         clearSelection,
-        setSelectedConnection,
+        setSelectedEdgeId,
         setContextMenu,
         closeWorkflowPanel,
         closeHistoryPanel,
@@ -173,7 +175,7 @@ export const usePointerHandlers = ({
         }
 
         // 2. Handle Connection Drop
-        if (completeConnectionDrag(handleAddNext, setNodes, nodes, handleConnectionMade)) {
+        if (completeConnectionDrag(handleAddNext, validateAndAddEdge, handleConnectionMade)) {
             releasePointerCapture(e);
             return;
         }
@@ -195,7 +197,7 @@ export const usePointerHandlers = ({
         releasePointerCapture,
         completeConnectionDrag,
         handleAddNext,
-        setNodes,
+        validateAndAddEdge,
         handleConnectionMade,
         endPanning,
         endNodeDrag

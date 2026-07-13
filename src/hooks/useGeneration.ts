@@ -11,13 +11,23 @@ import { generateLocalImage } from '../services/localModelService';
 import { buildGenerationSuccessUpdate } from '../utils/takeHelpers';
 import { isSeedanceVideoModel } from '../utils/videoModelRouting';
 import { extractVideoLastFrame } from '../utils/videoHelpers';
+import type { CanvasEdge } from '../domain/graph/graphTypes';
+import {
+    getConnectedImageInputs,
+    getConnectedTextInputs,
+    getEndFrameInput,
+    getMotionReferenceInput,
+    getReferenceImageInputs,
+    getStartFrameInput
+} from '../domain/graph/connectionSelectors';
 
 interface UseGenerationProps {
     nodes: NodeData[];
+    edges: CanvasEdge[];
     updateNode: (id: string, updates: Partial<NodeData>) => void;
 }
 
-export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
+export const useGeneration = ({ nodes, edges, updateNode }: UseGenerationProps) => {
     // ============================================================================
     // HELPERS
     // ============================================================================
@@ -88,25 +98,22 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
         const node = nodes.find(n => n.id === id);
         if (!node) return;
 
-        // Get prompts from connected TEXT nodes (if any)
-        const getTextNodePrompts = (): string[] => {
-            if (!node.parentIds) return [];
-            return node.parentIds
-                .map(pid => nodes.find(n => n.id === pid))
-                .filter(n => n?.type === NodeType.TEXT && n.prompt)
-                .map(n => n!.prompt);
-        };
-
         // Combine prompts: TEXT node prompts + node's own prompt
-        const textNodePrompts = getTextNodePrompts();
+        const textNodePrompts = getConnectedTextInputs(node, nodes, edges)
+            .filter(input => input.prompt)
+            .map(input => input.prompt);
         const combinedPrompt = [...textNodePrompts, node.prompt].filter(Boolean).join('\n\n');
+        const connectedImageInputs = getConnectedImageInputs(node, nodes, edges);
+        const startFrameInput = getStartFrameInput(node, nodes, edges);
+        const endFrameInput = getEndFrameInput(node, nodes, edges);
+        const motionReferenceInput = getMotionReferenceInput(node, nodes, edges);
 
         // Check if prompt is required
         // For Kling frame-to-frame with both start and end frames, prompt is optional
         const isKlingFrameToFrame =
             node.type === NodeType.VIDEO &&
             node.videoModel?.startsWith('kling-') &&
-            (node.parentIds && node.parentIds.length >= 2);
+            Boolean(node.parentIds && node.parentIds.length >= 2);
 
         if (!combinedPrompt && !isKlingFrameToFrame) return;
 
@@ -117,26 +124,18 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                 // Collect ALL parent images for multi-input generation
                 const imageBase64s: string[] = [];
 
-                // Get images from all direct parents (excluding TEXT nodes)
-                if (node.parentIds && node.parentIds.length > 0) {
-                    for (const parentId of node.parentIds) {
-                        let currentId: string | undefined = parentId;
+                // Traverse each typed image input until a generated image is found.
+                for (const input of connectedImageInputs) {
+                    let current: NodeData | undefined = input;
+                    const visited = new Set<string>();
 
-                        // Traverse up the chain to find an image source (skip TEXT nodes)
-                        while (currentId && imageBase64s.length < 14) { // Gemini 3 Pro limit
-                            const parent = nodes.find(n => n.id === currentId);
-                            // Skip TEXT nodes - they provide prompts, not images
-                            if (parent?.type === NodeType.TEXT) {
-                                break;
-                            }
-                            if (parent?.resultUrl) {
-                                imageBase64s.push(parent.resultUrl);
-                                break; // Found image for this parent chain
-                            } else {
-                                // Continue up this chain
-                                currentId = parent?.parentIds?.[0];
-                            }
+                    while (current && imageBase64s.length < 14 && !visited.has(current.id)) {
+                        visited.add(current.id);
+                        if (current.resultUrl) {
+                            imageBase64s.push(current.resultUrl);
+                            break;
                         }
+                        current = getConnectedImageInputs(current, nodes, edges)[0];
                     }
                 }
 
@@ -187,12 +186,9 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
 
                 // Get parent images if any
                 const imageBase64s: string[] = [];
-                if (node.parentIds && node.parentIds.length > 0) {
-                    for (const parentId of node.parentIds) {
-                        const parent = nodes.find(n => n.id === parentId);
-                        if (parent?.type !== NodeType.TEXT && parent?.resultUrl) {
-                            imageBase64s.push(parent.resultUrl);
-                        }
+                if (connectedImageInputs.length > 0) {
+                    for (const parent of connectedImageInputs) {
+                        if (parent.resultUrl) imageBase64s.push(parent.resultUrl);
                     }
                 }
 
@@ -230,98 +226,44 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                 }
 
             } else if (node.type === NodeType.VIDEO) {
-                // Get first parent image for video generation (start frame)
                 let imageBase64: string | string[] | undefined;
                 let lastFrameBase64: string | undefined;
-
-                // Get non-TEXT parent nodes (image sources only)
-                const imageParentIds = node.parentIds?.filter(pid => {
-                    const parent = nodes.find(n => n.id === pid);
-                    return parent?.type !== NodeType.TEXT;
-                }) || [];
-
-                // Check for frame-to-frame mode (explicit or auto-detected from 2+ image parents)
-                const hasMultipleInputs = imageParentIds.length >= 2;
-                const hasExplicitFrameInputs = node.frameInputs && node.frameInputs.length >= 2;
                 const isSeedanceModel = isSeedanceVideoModel(node.videoModel);
                 const requestedDuration = isSeedanceModel ? undefined : node.videoDuration;
-                const seedanceReferenceImages = node.parentIds
-                    ?.map(pid => nodes.find(n => n.id === pid))
-                    .filter(n => n?.type === NodeType.IMAGE && n.resultUrl)
-                    .map(n => n!.resultUrl!)
-                    || [];
-
-                // Motion Reference logic (Kling 2.6)
-                let motionReferenceUrl: string | undefined;
-                let isMotionControl = false;
-                if (node.videoModel === 'kling-v2-6') {
-                    // Find a parent video node that has a result
-                    const videoParent = node.parentIds
-                        ?.map(pid => nodes.find(n => n.id === pid))
-                        .find(n => n?.type === NodeType.VIDEO && n.resultUrl);
-
-                    if (videoParent) {
-                        motionReferenceUrl = videoParent.resultUrl;
-                        isMotionControl = true;
+                const referenceImageInputs = getReferenceImageInputs(node, nodes, edges);
+                const inputImageValue = (input?: NodeData): string | undefined => {
+                    if (!input) return undefined;
+                    if (input.type === NodeType.VIDEO || input.type === NodeType.VIDEO_EDITOR) {
+                        return input.lastFrame || input.resultUrl;
                     }
-                }
+                    return input.resultUrl;
+                };
+                const seedanceReferenceImages = connectedImageInputs
+                    .filter(input => input.type === NodeType.IMAGE)
+                    .map(inputImageValue)
+                    .filter((url): url is string => Boolean(url));
+                const motionReferenceUrl = node.videoModel === 'kling-v2-6'
+                    ? motionReferenceInput?.resultUrl
+                    : undefined;
+                const isMotionControl = Boolean(motionReferenceUrl);
+                const hasStartAndEndFrames = Boolean(startFrameInput && endFrameInput);
 
                 // Seedance uses reference images, not start/end interpolation frames.
-                const isFrameToFrame = !isSeedanceModel && !isMotionControl && (node.videoMode === 'frame-to-frame' || hasMultipleInputs || hasExplicitFrameInputs);
+                const isFrameToFrame = !isSeedanceModel && !isMotionControl &&
+                    (node.videoMode === 'frame-to-frame' || hasStartAndEndFrames);
 
                 if (isSeedanceModel && seedanceReferenceImages.length > 0) {
                     imageBase64 = seedanceReferenceImages;
-                } else if (isFrameToFrame && imageParentIds.length >= 2) {
-                    // Get start and end frames from frameInputs (if user reordered) or default order
-                    const parent1 = nodes.find(n => n.id === imageParentIds[0]);
-                    const parent2 = nodes.find(n => n.id === imageParentIds[1]);
-
-                    // Check if user has explicitly set frame order
-                    if (node.frameInputs && node.frameInputs.length >= 2) {
-                        const startFrameInput = node.frameInputs.find(f => f.order === 'start');
-                        const endFrameInput = node.frameInputs.find(f => f.order === 'end');
-
-                        if (startFrameInput) {
-                            const startNode = nodes.find(n => n.id === startFrameInput.nodeId);
-                            if (startNode?.resultUrl) {
-                                imageBase64 = startNode.resultUrl;
-                            }
-                        }
-
-                        if (endFrameInput) {
-                            const endNode = nodes.find(n => n.id === endFrameInput.nodeId);
-                            if (endNode?.resultUrl) {
-                                lastFrameBase64 = endNode.resultUrl;
-                            }
-                        }
-                    } else {
-                        // Default: first parent = start, second parent = end
-                        if (parent1?.resultUrl) imageBase64 = parent1.resultUrl;
-                        if (parent2?.resultUrl) lastFrameBase64 = parent2.resultUrl;
-                    }
-                } else if (imageParentIds.length > 0) {
-                    // Standard mode or Motion Control: get character reference or first parent image
+                } else if (isFrameToFrame && startFrameInput && endFrameInput) {
+                    imageBase64 = inputImageValue(startFrameInput);
+                    lastFrameBase64 = inputImageValue(endFrameInput);
+                } else if (connectedImageInputs.length > 0) {
                     if (isMotionControl) {
-                        // For Motion Control, look specifically for an IMAGE parent as character reference
-                        const characterParent = node.parentIds
-                            ?.map(pid => nodes.find(n => n.id === pid))
-                            .find(n => n?.type === NodeType.IMAGE && n.resultUrl);
-
-                        if (characterParent?.resultUrl) {
-                            imageBase64 = characterParent.resultUrl;
-                        }
+                        const characterReference = referenceImageInputs.find(input => input.type === NodeType.IMAGE)
+                            || connectedImageInputs.find(input => input.type === NodeType.IMAGE);
+                        imageBase64 = inputImageValue(characterReference);
                     } else {
-                        // Standard mode: get first parent image or video last frame
-                        // Use imageParentIds (filtered to exclude TEXT nodes) instead of raw parentIds
-                        const parent = nodes.find(n => n.id === imageParentIds[0]);
-
-                        if (parent?.type === NodeType.VIDEO && parent.lastFrame) {
-                            // Use last frame from parent video
-                            imageBase64 = parent.lastFrame;
-                        } else if (parent?.resultUrl) {
-                            // Use parent image directly
-                            imageBase64 = parent.resultUrl;
-                        }
+                        imageBase64 = inputImageValue(startFrameInput || connectedImageInputs[0]);
                     }
                 }
 

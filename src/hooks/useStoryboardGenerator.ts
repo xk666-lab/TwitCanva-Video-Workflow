@@ -6,7 +6,8 @@
  */
 
 import { useState, useCallback } from 'react';
-import { NodeData, NodeStatus, NodeType, Viewport } from '../types';
+import { NodeData, Viewport } from '../types';
+import { createStoryboardImageNode } from '../utils/storyboardNodeFactory';
 
 // ============================================================================
 // TYPES
@@ -481,25 +482,16 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
                 ? [state.compositeImageUrl]
                 : characterImageUrls.length > 0 ? characterImageUrls : undefined;
 
-            return {
+            return createStoryboardImageNode({
                 id: crypto.randomUUID(),
-                type: NodeType.IMAGE,
                 x: startX + index * (NODE_WIDTH + NODE_GAP),
                 y: centerY - 100,
                 prompt,
-                // Set to IDLE - handleGenerate will set to LOADING when called
-                status: NodeStatus.IDLE,
-                model: selectedImageModel,
                 imageModel: selectedImageModel,
-                aspectRatio: '16:9',
-                resolution: '1K',
                 title: `Scene ${sceneNumber}`,
-                parentIds: [],
-                // Assign group ID for auto-grouping
                 groupId: storyboardGroupId,
-                // Use composite image as reference for consistent scene extraction
                 characterReferenceUrls: referenceUrls
-            };
+            });
         });
 
         // Pass the group info along with nodes for App.tsx to create the group

@@ -5,8 +5,8 @@
  */
 
 import React from 'react';
-import { NodeData, NodeType, NodeStatus } from '../types';
-import { DEFAULT_SEEDANCE_VIDEO_MODEL_ID } from '../utils/videoModelRouting';
+import { NodeData, NodeType } from '../types';
+import { createDefaultNodeData } from '../domain/nodes/nodeRegistry';
 
 interface UseTextNodeHandlersOptions {
     nodes: NodeData[];
@@ -41,16 +41,11 @@ export const useTextNodeHandlers = ({
         const NODE_WIDTH = 340;
 
         const videoNode: NodeData = {
+            ...createDefaultNodeData(NodeType.VIDEO),
             id: videoNodeId,
-            type: NodeType.VIDEO,
             x: textNode.x + NODE_WIDTH + GAP,
             y: textNode.y,
             prompt: textNode.prompt || '',
-            status: NodeStatus.IDLE,
-            model: DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
-            videoModel: DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
-            aspectRatio: 'Auto',
-            resolution: 'Auto',
             parentIds: [nodeId]
         };
 
@@ -78,16 +73,11 @@ export const useTextNodeHandlers = ({
         const NODE_WIDTH = 340;
 
         const imageNode: NodeData = {
+            ...createDefaultNodeData(NodeType.IMAGE),
             id: imageNodeId,
-            type: NodeType.IMAGE,
             x: textNode.x + NODE_WIDTH + GAP,
             y: textNode.y,
             prompt: textNode.prompt || '',
-            status: NodeStatus.IDLE,
-            model: 'gpt-image-2',
-            imageModel: 'gpt-image-2',
-            aspectRatio: 'Auto',
-            resolution: 'Auto',
             parentIds: [nodeId]
         };
 

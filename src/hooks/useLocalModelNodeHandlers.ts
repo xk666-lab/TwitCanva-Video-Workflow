@@ -5,7 +5,8 @@
  * Similar pattern to useImageNodeHandlers but for local models.
  */
 
-import { NodeData, NodeType, NodeStatus } from '../types';
+import { NodeData, NodeType } from '../types';
+import { createDefaultNodeData } from '../domain/nodes/nodeRegistry';
 
 // ============================================================================
 // TYPES
@@ -51,17 +52,11 @@ export const useLocalModelNodeHandlers = ({
         const newNodeId = crypto.randomUUID();
 
         const newNode: NodeData = {
+            ...createDefaultNodeData(NodeType.LOCAL_IMAGE_MODEL),
             id: newNodeId,
-            type: NodeType.LOCAL_IMAGE_MODEL,
             x,
             y,
-            prompt: '',
-            status: NodeStatus.IDLE,
-            model: 'local',
-            aspectRatio: '1:1',
-            resolution: 'Auto',
             localModelId: modelId,
-            localModelType: 'diffusion',
             parentIds: parentNodeId ? [parentNodeId] : undefined
         };
 
@@ -86,18 +81,11 @@ export const useLocalModelNodeHandlers = ({
         const newNodeId = crypto.randomUUID();
 
         const newNode: NodeData = {
+            ...createDefaultNodeData(NodeType.LOCAL_VIDEO_MODEL),
             id: newNodeId,
-            type: NodeType.LOCAL_VIDEO_MODEL,
             x,
             y,
-            prompt: '',
-            status: NodeStatus.IDLE,
-            model: 'local',
-            aspectRatio: '16:9',
-            resolution: 'Auto',
             localModelId: modelId,
-            localModelType: 'diffusion', // Video models also use diffusion architecture
-            videoDuration: 5,
             parentIds: parentNodeId ? [parentNodeId] : undefined
         };
 
