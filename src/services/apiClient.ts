@@ -5,7 +5,15 @@ export const readErrorMessage = async (response: Response): Promise<string> => {
 
   try {
     const data = JSON.parse(text);
-    return data.error || data.message || data.details || fallback || text;
+    const errorValue = data.error;
+    if (errorValue && typeof errorValue === 'object' && typeof errorValue.message === 'string') {
+      return errorValue.message;
+    }
+    return (typeof errorValue === 'string' ? errorValue : undefined)
+      || data.message
+      || data.details
+      || fallback
+      || text;
   } catch {
     return text || fallback || 'Request failed';
   }

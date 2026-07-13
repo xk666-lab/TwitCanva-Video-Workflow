@@ -18,6 +18,8 @@ interface CanvasNodeProps {
   connectedImageNodes?: { id: string; url: string; type?: NodeType }[]; // For frame-to-frame video mode and motion control
   onUpdate: (id: string, updates: Partial<NodeData>) => void;
   onGenerate: (id: string) => void;
+  onCancelGeneration?: (id: string) => void;
+  onRetryGeneration?: (id: string) => void;
   onAddNext: (id: string, type: 'left' | 'right') => void;
   selected: boolean;
   showControls?: boolean; // Only show controls when single node is selected (not in group selection)
@@ -56,6 +58,8 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
   connectedImageNodes,
   onUpdate,
   onGenerate,
+  onCancelGeneration,
+  onRetryGeneration,
   onAddNext,
   selected,
   showControls = true, // Default to true for backward compatibility
@@ -925,6 +929,8 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
               connectedImageNodes={connectedImageNodes}
               onUpdate={onUpdate}
               onGenerate={onGenerate}
+              onCancelGeneration={onCancelGeneration}
+              onRetryGeneration={onRetryGeneration}
               onChangeAngleGenerate={onChangeAngleGenerate}
               onSelect={onSelect}
               zoom={zoom}

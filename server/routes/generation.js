@@ -6,6 +6,7 @@
  */
 
 import express from 'express';
+import crypto from 'node:crypto';
 import fs from 'fs';
 import path from 'path';
 import { generateKlingVideo, generateKlingImage, generateKlingMultiImage } from '../services/kling.js';
@@ -15,7 +16,11 @@ import { generateOpenAIImage } from '../services/openai.js';
 import { generateSeedanceVideo } from '../services/seedance.js';
 import { createMediaTake } from '../services/takeMetadata.js';
 import { isSeedanceVideoModel } from '../services/videoModelRouting.js';
-import { resolveImageToBase64, saveBufferToFile } from '../utils/imageHelpers.js';
+import { isTrustedLocalOrigin } from '../services/localOriginPolicy.js';
+import {
+    resolveImageToBase64,
+    saveBufferToFile
+} from '../utils/imageHelpers.js';
 
 const router = express.Router();
 
@@ -40,6 +45,7 @@ function metadataToTake(meta, url, fallbackType) {
         createdAt: meta.createdAt,
         thumbnailUrl: meta.thumbnailUrl,
         metadata: {
+            ...(meta.metadata && typeof meta.metadata === 'object' ? meta.metadata : {}),
             filename: meta.filename,
             aspectRatio: meta.aspectRatio,
             resolution: meta.resolution
@@ -72,14 +78,271 @@ function findLatestTakeForNode(nodeId, dirs) {
     return matches[0] || null;
 }
 
+function findTakeForGenerationTask(taskId, dirs) {
+    for (const { dir, mediaType, urlType } of dirs) {
+        if (!fs.existsSync(dir)) continue;
+        for (const file of fs.readdirSync(dir)) {
+            if (!file.endsWith('.json')) continue;
+            const meta = readJsonFile(path.join(dir, file));
+            if (!meta || meta.generationTaskId !== taskId) continue;
+            return {
+                meta,
+                url: `/library/${urlType}/${meta.filename}`,
+                type: mediaType
+            };
+        }
+    }
+    return null;
+}
+
+export function recoverGenerationTaskOutput(task, locals) {
+    const recovered = findTakeForGenerationTask(task.taskId, [
+        { dir: locals.IMAGES_DIR, mediaType: 'image', urlType: 'images' },
+        { dir: locals.VIDEOS_DIR, mediaType: 'video', urlType: 'videos' }
+    ]);
+    if (!recovered) return null;
+    return {
+        resultUrl: recovered.url,
+        take: metadataToTake(recovered.meta, recovered.url, recovered.type)
+    };
+}
+
+const SUPPORTED_TASK_OPERATIONS = new Set(['generate-image', 'generate-video', 'generate-local-image']);
+const SENSITIVE_TASK_INPUT_KEY = /(api.?key|authorization|access.?key|secret.?key|bearer.?token)/i;
+
+function persistTaskDataUrl(dataUrl, locals) {
+    const match = dataUrl.match(/^data:(image|video)\/(png|jpe?g|webp|gif|mp4|webm);base64,(.+)$/i);
+    if (!match) throw new TypeError('Unsupported task data URL type');
+
+    const mediaType = match[1].toLowerCase();
+    const extension = match[2].toLowerCase() === 'jpeg' ? 'jpg' : match[2].toLowerCase();
+    const buffer = Buffer.from(match[3], 'base64');
+    const contentHash = crypto.createHash('sha256').update(buffer).digest('hex');
+    const targetDir = mediaType === 'video' ? locals.VIDEOS_DIR : locals.IMAGES_DIR;
+    const filename = `task_input_${contentHash}.${extension}`;
+    const targetPath = path.join(targetDir, filename);
+    if (!fs.existsSync(targetPath)) fs.writeFileSync(targetPath, buffer);
+    return `/library/${path.basename(targetDir)}/${filename}`;
+}
+
+function materializeTaskInput(value, locals) {
+    if (typeof value === 'string' && value.startsWith('data:')) {
+        return persistTaskDataUrl(value, locals);
+    }
+    if (Array.isArray(value)) {
+        return value.map(item => materializeTaskInput(item, locals));
+    }
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(
+            Object.entries(value)
+                .filter(([key]) => !SENSITIVE_TASK_INPUT_KEY.test(key))
+                .map(([key, item]) => [key, materializeTaskInput(item, locals)])
+        );
+    }
+    return value;
+}
+
+function resolveTaskProviderAndModel(operation, inputSnapshot, locals) {
+    if (operation === 'generate-local-image') {
+        return {
+            provider: 'local',
+            model: inputSnapshot.modelId || inputSnapshot.modelPath || 'local-image-model'
+        };
+    }
+
+    if (operation === 'generate-image') {
+        const requestedModel = inputSnapshot.imageModel || locals.OPENAI_IMAGE_MODEL || 'gpt-image-2';
+        const model = requestedModel === 'gpt-image-1.5' ? 'gpt-image-2' : requestedModel;
+        const provider = model.startsWith('kling-')
+            ? 'kling'
+            : model.startsWith('gpt-image-')
+                ? 'openai'
+                : 'gemini';
+        return { provider, model };
+    }
+
+    const model = inputSnapshot.videoModel || 'veo-3.1';
+    const provider = model.startsWith('kling-')
+        ? (model === 'kling-v2-6' ? 'fal' : 'kling')
+        : model.startsWith('hailuo-')
+            ? 'hailuo'
+            : isSeedanceVideoModel(model)
+                ? 'seedance'
+                : 'gemini';
+    return { provider, model };
+}
+
+function pickTaskParameters(inputSnapshot) {
+    const parameterKeys = [
+        'aspectRatio',
+        'resolution',
+        'duration',
+        'imageModel',
+        'videoModel',
+        'generateAudio',
+        'klingReferenceMode',
+        'klingFaceIntensity',
+        'klingSubjectIntensity',
+        'modelId',
+        'modelPath',
+        'negativePrompt',
+        'steps',
+        'guidanceScale',
+        'seed'
+    ];
+    return Object.fromEntries(
+        parameterKeys
+            .filter(key => inputSnapshot[key] !== undefined)
+            .map(key => [key, inputSnapshot[key]])
+    );
+}
+
+function prepareTaskSubmission(body, locals, operationOverride) {
+    const operation = operationOverride || body?.operation;
+    if (!SUPPORTED_TASK_OPERATIONS.has(operation)) {
+        throw new TypeError(`Unsupported generation operation: ${operation || '(missing)'}`);
+    }
+
+    const rawInput = operationOverride
+        ? Object.fromEntries(Object.entries(body || {}).filter(([key]) => !['workflowId', 'idempotencyKey'].includes(key)))
+        : body?.inputSnapshot;
+    if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) {
+        throw new TypeError('inputSnapshot is required');
+    }
+
+    const nodeId = body?.nodeId
+        || rawInput.nodeId
+        || (operationOverride ? `legacy-${operation}-${crypto.randomUUID()}` : undefined);
+    if (!nodeId || typeof nodeId !== 'string') {
+        throw new TypeError('nodeId is required');
+    }
+
+    const inputSnapshot = {
+        ...materializeTaskInput(rawInput, locals),
+        nodeId
+    };
+    const { provider, model } = resolveTaskProviderAndModel(operation, inputSnapshot, locals);
+
+    return {
+        workflowId: body?.workflowId ?? null,
+        nodeId,
+        operation,
+        provider,
+        model,
+        inputSnapshot,
+        parameters: body?.parameters || pickTaskParameters(inputSnapshot),
+        idempotencyKey: body?.idempotencyKey
+    };
+}
+
+function taskRouteError(res, error) {
+    const isValidationError = error instanceof TypeError;
+    const status = isValidationError ? 400 : /not found/i.test(error.message || '') ? 404 : 500;
+    return res.status(status).json({
+        error: {
+            code: isValidationError ? 'VALIDATION_ERROR' : status === 404 ? 'TASK_NOT_FOUND' : 'UNKNOWN_ERROR',
+            message: error.message || 'Generation task request failed',
+            retryable: !isValidationError && status !== 404
+        }
+    });
+}
+
+async function runLegacyGeneration(req, res, operation) {
+    try {
+        const manager = req.app.locals.GENERATION_TASK_MANAGER;
+        if (!manager) throw new Error('Generation task manager is not initialized');
+        const submission = prepareTaskSubmission(req.body, req.app.locals, operation);
+        const { task } = await manager.submitTask(submission);
+        const terminalTask = await manager.waitForTask(task.taskId);
+
+        if (terminalTask.status === 'succeeded' && terminalTask.output?.resultUrl) {
+            return res.json({ ...terminalTask.output, task: terminalTask });
+        }
+
+        const statusCode = terminalTask.status === 'cancelled'
+            ? 409
+            : terminalTask.provider === 'seedance'
+                ? 502
+                : 500;
+        return res.status(statusCode).json({
+            error: terminalTask.error?.message || 'Generation failed',
+            task: terminalTask
+        });
+    } catch (error) {
+        console.error(`[GenerationTasks] Legacy ${operation} failed:`, error);
+        return taskRouteError(res, error);
+    }
+}
+
+router.use('/generation-tasks', (req, res, next) => {
+    const allowedOrigins = req.app.locals.TASK_ALLOWED_ORIGINS || [];
+    if (isTrustedLocalOrigin(req.get('origin'), allowedOrigins)) return next();
+    return res.status(403).json({
+        error: {
+            code: 'FORBIDDEN_ORIGIN',
+            message: 'Generation task APIs are only available to the local workbench.',
+            retryable: false
+        }
+    });
+});
+
+router.post('/generation-tasks', async (req, res) => {
+    try {
+        const submission = prepareTaskSubmission(req.body, req.app.locals);
+        const result = await req.app.locals.GENERATION_TASK_MANAGER.submitTask(submission);
+        return res.status(result.reused ? 200 : 202).json(result);
+    } catch (error) {
+        return taskRouteError(res, error);
+    }
+});
+
+router.post('/generation-tasks/query', (req, res) => {
+    try {
+        const tasks = req.app.locals.GENERATION_TASK_MANAGER.queryTasks(req.body || {});
+        return res.json({ tasks });
+    } catch (error) {
+        return taskRouteError(res, error);
+    }
+});
+
+router.get('/generation-tasks/:taskId', (req, res) => {
+    try {
+        const task = req.app.locals.GENERATION_TASK_MANAGER.getTask(req.params.taskId);
+        if (!task) return res.status(404).json({ error: { code: 'TASK_NOT_FOUND', message: 'Generation task not found', retryable: false } });
+        return res.json({ task });
+    } catch (error) {
+        return taskRouteError(res, error);
+    }
+});
+
+router.post('/generation-tasks/:taskId/cancel', async (req, res) => {
+    try {
+        const task = await req.app.locals.GENERATION_TASK_MANAGER.cancelTask(req.params.taskId);
+        return res.json({ task });
+    } catch (error) {
+        return taskRouteError(res, error);
+    }
+});
+
+router.post('/generation-tasks/:taskId/retry', async (req, res) => {
+    try {
+        const task = await req.app.locals.GENERATION_TASK_MANAGER.retryTask(req.params.taskId);
+        return res.status(202).json({ task });
+    } catch (error) {
+        return taskRouteError(res, error);
+    }
+});
+
+router.post('/generate-image', (req, res) => runLegacyGeneration(req, res, 'generate-image'));
+router.post('/generate-video', (req, res) => runLegacyGeneration(req, res, 'generate-video'));
+
 // ============================================================================
 // IMAGE GENERATION
 // ============================================================================
 
-router.post('/generate-image', async (req, res) => {
-    try {
-        const { nodeId, prompt, aspectRatio, resolution, imageBase64: rawImageBase64, imageModel: requestedImageModel, klingReferenceMode, klingFaceIntensity, klingSubjectIntensity } = req.body;
-        const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_IMAGE_MODEL, IMAGES_DIR } = req.app.locals;
+async function executeImageGeneration(inputSnapshot, locals) {
+        const { nodeId, generationTaskId, prompt, aspectRatio, resolution, imageBase64: rawImageBase64, imageModel: requestedImageModel, klingReferenceMode, klingFaceIntensity, klingSubjectIntensity } = inputSnapshot;
+        const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_IMAGE_MODEL, IMAGES_DIR } = locals;
         const selectedImageModel = requestedImageModel || OPENAI_IMAGE_MODEL || 'gpt-image-2';
         const imageModel = selectedImageModel === 'gpt-image-1.5' ? 'gpt-image-2' : selectedImageModel;
 
@@ -93,9 +356,7 @@ router.post('/generate-image', async (req, res) => {
         if (isKlingModel) {
             // --- KLING AI IMAGE GENERATION ---
             if (!KLING_ACCESS_KEY || !KLING_SECRET_KEY) {
-                return res.status(500).json({
-                    error: "Kling API credentials not configured. Add KLING_ACCESS_KEY and KLING_SECRET_KEY to .env"
-                });
+                throw new Error('Kling API credentials not configured. Add KLING_ACCESS_KEY and KLING_SECRET_KEY to .env');
             }
 
             console.log(`Using Kling AI model for image: ${imageModel}`);
@@ -169,9 +430,7 @@ router.post('/generate-image', async (req, res) => {
         } else if (isOpenAIModel) {
             // --- OPENAI GPT IMAGE GENERATION ---
             if (!OPENAI_API_KEY) {
-                return res.status(500).json({
-                    error: "OpenAI API key not configured. Add OPENAI_API_KEY to .env"
-                });
+                throw new Error('OpenAI API key not configured. Add OPENAI_API_KEY to .env');
             }
 
             console.log(`Using OpenAI GPT Image model: ${imageModel}`);
@@ -196,7 +455,7 @@ router.post('/generate-image', async (req, res) => {
         } else {
             // --- GEMINI IMAGE GENERATION (Default) ---
             if (!GEMINI_API_KEY) {
-                return res.status(500).json({ error: "Server missing API Key config" });
+                throw new Error('Server missing API Key config');
             }
 
             let imageBase64Array = null;
@@ -227,7 +486,8 @@ router.post('/generate-image', async (req, res) => {
             createdAt,
             metadata: {
                 filename: saved.filename,
-                format: imageFormat
+                format: imageFormat,
+                generationTaskId
             }
         });
 
@@ -240,27 +500,22 @@ router.post('/generate-image', async (req, res) => {
             model: imageModel || 'gemini-pro',
             createdAt,
             type: 'images',
-            mediaType: 'image'
+            mediaType: 'image',
+            generationTaskId
         };
         fs.writeFileSync(path.join(IMAGES_DIR, `${take.id}.json`), JSON.stringify(metadata, null, 2));
 
         console.log(`Image saved: ${saved.url} (model: ${imageModel || 'gemini-pro'})`);
-        return res.json({ resultUrl: saved.url, take });
-
-    } catch (error) {
-        console.error("Server Image Gen Error:", error);
-        res.status(500).json({ error: error.message || "Image generation failed" });
-    }
-});
+        return { resultUrl: saved.url, take };
+}
 
 // ============================================================================
 // VIDEO GENERATION
 // ============================================================================
 
-router.post('/generate-video', async (req, res) => {
-    try {
-        const { nodeId, prompt, imageBase64: rawImageBase64, lastFrameBase64: rawLastFrameBase64, motionReferenceUrl: rawMotionReferenceUrl, aspectRatio, resolution, duration, videoModel } = req.body;
-        const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, HAILUO_API_KEY, SEEDANCE_API_KEY, SEEDANCE_BASE_URL, SEEDANCE_SUBMIT_PATH, SEEDANCE_STATUS_PATH, VIDEOS_DIR } = req.app.locals;
+async function executeVideoGeneration(inputSnapshot, locals) {
+        const { nodeId, generationTaskId, prompt, imageBase64: rawImageBase64, lastFrameBase64: rawLastFrameBase64, motionReferenceUrl: rawMotionReferenceUrl, aspectRatio, resolution, duration, videoModel } = inputSnapshot;
+        const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, HAILUO_API_KEY, SEEDANCE_API_KEY, SEEDANCE_BASE_URL, SEEDANCE_SUBMIT_PATH, SEEDANCE_STATUS_PATH, VIDEOS_DIR } = locals;
 
         // Resolve file URLs to base64. Seedance can receive multiple image references;
         // other video providers keep using the first image as the start frame.
@@ -294,12 +549,10 @@ router.post('/generate-video', async (req, res) => {
             if (isKling26) {
                 // --- KLING 2.6 VIA FAL.AI ---
                 // Official Kling API doesn't support v2.6, use fal.ai instead
-                const { FAL_API_KEY } = req.app.locals;
+                const { FAL_API_KEY } = locals;
 
                 if (!FAL_API_KEY) {
-                    return res.status(500).json({
-                        error: "FAL_API_KEY not configured. Add FAL_API_KEY to .env for Kling 2.6."
-                    });
+                    throw new Error('FAL_API_KEY not configured. Add FAL_API_KEY to .env for Kling 2.6.');
                 }
 
                 if (isMotionControl) {
@@ -323,7 +576,7 @@ router.post('/generate-video', async (req, res) => {
                     console.log(`\n[Route] Kling 2.6 Image-to-Video - routing to fal.ai`);
                     console.log(`[Route] Image: ${imageBase64 ? 'YES (' + Math.round(imageBase64.length / 1024) + ' KB)' : 'NO'}`);
                     console.log(`[Route] Duration: ${duration || 5}s`);
-                    console.log(`[Route] Generate Audio: ${req.body.generateAudio !== false}`);
+                    console.log(`[Route] Generate Audio: ${inputSnapshot.generateAudio !== false}`);
 
                     const { generateFalImageToVideo } = await import('../services/fal.js');
 
@@ -331,16 +584,14 @@ router.post('/generate-video', async (req, res) => {
                         prompt,
                         imageBase64,
                         duration: String(duration || 5),
-                        generateAudio: req.body.generateAudio !== false, // Default to true
+                        generateAudio: inputSnapshot.generateAudio !== false, // Default to true
                         apiKey: FAL_API_KEY
                     });
                 }
             } else {
                 // --- STANDARD KLING VIDEO GENERATION ---
                 if (!KLING_ACCESS_KEY || !KLING_SECRET_KEY) {
-                    return res.status(500).json({
-                        error: "Kling API credentials not configured. Add KLING_ACCESS_KEY and KLING_SECRET_KEY to .env"
-                    });
+                    throw new Error('Kling API credentials not configured. Add KLING_ACCESS_KEY and KLING_SECRET_KEY to .env');
                 }
 
                 console.log(`Using Kling AI model: ${videoModel}, duration: ${duration || 5}s`);
@@ -368,9 +619,7 @@ router.post('/generate-video', async (req, res) => {
         } else if (isHailuoModel) {
             // --- HAILUO AI VIDEO GENERATION ---
             if (!HAILUO_API_KEY) {
-                return res.status(500).json({
-                    error: "Hailuo API key not configured. Add HAILUO_API_KEY to .env"
-                });
+                throw new Error('Hailuo API key not configured. Add HAILUO_API_KEY to .env');
             }
 
             console.log(`Using Hailuo AI model: ${videoModel}, duration: ${duration || 6}s`);
@@ -396,9 +645,7 @@ router.post('/generate-video', async (req, res) => {
         } else if (isSeedanceModel) {
             // --- SEEDANCE 2.0 VIDEO GENERATION ---
             if (!SEEDANCE_API_KEY) {
-                return res.status(500).json({
-                    error: "Seedance API key not configured. Add SEEDANCE_API_KEY to .env"
-                });
+                throw new Error('Seedance API key not configured. Add SEEDANCE_API_KEY to .env');
             }
 
             console.log(`Using Seedance model: ${videoModel}, duration: ${duration || 'Auto'}`);
@@ -412,14 +659,14 @@ router.post('/generate-video', async (req, res) => {
                 aspectRatio,
                 resolution,
                 duration: undefined,
-                generateAudio: req.body.generateAudio,
-                watermark: req.body.watermark,
+                generateAudio: inputSnapshot.generateAudio,
+                watermark: inputSnapshot.watermark,
                 apiKey: SEEDANCE_API_KEY,
                 baseUrl: SEEDANCE_BASE_URL,
                 submitPath: SEEDANCE_SUBMIT_PATH,
                 statusPath: SEEDANCE_STATUS_PATH,
                 assetStorage: {
-                    libraryDir: req.app.locals.LIBRARY_DIR
+                    libraryDir: locals.LIBRARY_DIR
                 }
             });
 
@@ -432,10 +679,10 @@ router.post('/generate-video', async (req, res) => {
         } else {
             // --- VEO VIDEO GENERATION (Default) ---
             if (!GEMINI_API_KEY) {
-                return res.status(500).json({ error: "Server missing API Key config" });
+                throw new Error('Server missing API Key config');
             }
 
-            console.log(`Using Veo model: ${videoModel || 'veo-3.1'}, duration: ${duration || 8}s, generateAudio: ${req.body.generateAudio !== false}`);
+            console.log(`Using Veo model: ${videoModel || 'veo-3.1'}, duration: ${duration || 8}s, generateAudio: ${inputSnapshot.generateAudio !== false}`);
 
             videoBuffer = await generateVeoVideo({
                 prompt,
@@ -444,7 +691,7 @@ router.post('/generate-video', async (req, res) => {
                 aspectRatio,
                 resolution,
                 duration: duration || 8,
-                generateAudio: req.body.generateAudio !== false, // Default to true
+                generateAudio: inputSnapshot.generateAudio !== false, // Default to true
                 apiKey: GEMINI_API_KEY
             });
         }
@@ -463,7 +710,8 @@ router.post('/generate-video', async (req, res) => {
             metadata: {
                 filename: saved.filename,
                 aspectRatio: aspectRatio || 'Auto',
-                resolution: resolution || 'Auto'
+                resolution: resolution || 'Auto',
+                generationTaskId
             }
         });
 
@@ -478,19 +726,28 @@ router.post('/generate-video', async (req, res) => {
             resolution: resolution || 'Auto',
             createdAt,
             type: 'videos',
-            mediaType: 'video'
+            mediaType: 'video',
+            generationTaskId
         };
         fs.writeFileSync(path.join(VIDEOS_DIR, `${take.id}.json`), JSON.stringify(metadata, null, 2));
 
         console.log(`Video saved: ${saved.url} (model: ${videoModel || 'veo-3.1'})`);
-        return res.json({ resultUrl: saved.url, take });
+        return { resultUrl: saved.url, take };
+}
 
-    } catch (error) {
-        console.error("Server Video Gen Error:", error);
-        const statusCode = String(error.message || '').toLowerCase().includes('seedance') ? 502 : 500;
-        res.status(statusCode).json({ error: error.message || "Video generation failed" });
+export async function executeGenerationTask(task, locals) {
+    if (task.operation === 'generate-image') {
+        return executeImageGeneration({ ...task.inputSnapshot, generationTaskId: task.taskId }, locals);
     }
-});
+    if (task.operation === 'generate-video') {
+        return executeVideoGeneration({ ...task.inputSnapshot, generationTaskId: task.taskId }, locals);
+    }
+    if (task.operation === 'generate-local-image') {
+        const { executeLocalImageGeneration } = await import('./local-models.js');
+        return executeLocalImageGeneration({ ...task.inputSnapshot, generationTaskId: task.taskId }, locals);
+    }
+    throw new TypeError(`Unsupported generation operation: ${task.operation}`);
+}
 
 // ============================================================================
 // GENERATION STATUS / RECOVERY
@@ -504,6 +761,30 @@ router.get('/generation-status/:nodeId', async (req, res) => {
     try {
         const { nodeId } = req.params;
         const { IMAGES_DIR, VIDEOS_DIR } = req.app.locals;
+        const taskManager = req.app.locals.GENERATION_TASK_MANAGER;
+        const latestTask = taskManager?.queryTasks({ nodeIds: [nodeId] })[0];
+
+        if (latestTask) {
+            if (latestTask.status === 'succeeded' && latestTask.output?.resultUrl) {
+                return res.json({
+                    status: 'success',
+                    resultUrl: latestTask.output.resultUrl,
+                    type: latestTask.output.take?.type || (latestTask.operation === 'generate-video' ? 'video' : 'image'),
+                    createdAt: latestTask.completedAt || latestTask.updatedAt,
+                    take: latestTask.output.take,
+                    task: latestTask
+                });
+            }
+            if (latestTask.status === 'failed' || latestTask.status === 'cancelled') {
+                return res.json({
+                    status: latestTask.status === 'cancelled' ? 'cancelled' : 'error',
+                    error: latestTask.error,
+                    createdAt: latestTask.createdAt,
+                    task: latestTask
+                });
+            }
+            return res.json({ status: 'pending', task: latestTask });
+        }
 
         const latest = findLatestTakeForNode(nodeId, [
             { dir: IMAGES_DIR, mediaType: 'image', urlType: 'images' },

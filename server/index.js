@@ -8,7 +8,10 @@ import { GoogleGenAI } from '@google/genai';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import generationRoutes from './routes/generation.js';
+import generationRoutes, {
+    executeGenerationTask,
+    recoverGenerationTaskOutput
+} from './routes/generation.js';
 import twitterRoutes from './routes/twitter.js';
 import tiktokPostRoutes from './routes/tiktok-post.js';
 import localModelsRoutes from './routes/local-models.js';
@@ -18,12 +21,19 @@ import libraryRoutes from './routes/library.js';
 import assetRoutes from './routes/assets.js';
 import mediaToolRoutes from './routes/media-tools.js';
 import chatRoutes from './routes/chat.js';
+import { createGenerationTaskManager } from './services/generationTasks.js';
+import { isTrustedLocalOrigin } from './services/localOriginPolicy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 3001;
+const HOST = process.env.SERVER_HOST || '127.0.0.1';
+const ALLOWED_BROWSER_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS || process.env.TASK_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean);
 
 // Ensure library directories exist
 const LIBRARY_DIR = path.join(__dirname, '..', 'library');
@@ -32,15 +42,25 @@ const IMAGES_DIR = path.join(LIBRARY_DIR, 'images');
 const VIDEOS_DIR = path.join(LIBRARY_DIR, 'videos');
 const CHATS_DIR = path.join(LIBRARY_DIR, 'chats');
 const LIBRARY_ASSETS_DIR = path.join(LIBRARY_DIR, 'assets');
+const SERVER_DATA_DIR = path.join(__dirname, '..', '.twitcanva');
+const TASKS_DIR = path.join(SERVER_DATA_DIR, 'tasks');
 
-[LIBRARY_DIR, WORKFLOWS_DIR, IMAGES_DIR, VIDEOS_DIR, CHATS_DIR, LIBRARY_ASSETS_DIR].forEach(dir => {
+[LIBRARY_DIR, WORKFLOWS_DIR, IMAGES_DIR, VIDEOS_DIR, CHATS_DIR, LIBRARY_ASSETS_DIR, TASKS_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
 });
 
-// Enable CORS for all routes (must come before static file serving)
-app.use(cors());
+// The local backend contains provider credentials and task history; reject arbitrary browser origins.
+app.use((req, res, next) => {
+    if (isTrustedLocalOrigin(req.get('origin'), ALLOWED_BROWSER_ORIGINS)) return next();
+    return res.status(403).json({ error: 'This local API only accepts trusted workbench origins.' });
+});
+app.use(cors({
+    origin(origin, callback) {
+        callback(null, isTrustedLocalOrigin(origin, ALLOWED_BROWSER_ORIGINS));
+    }
+}));
 app.use(express.json({ limit: '100mb' }));
 
 // Serve static assets from library with CORS headers for cross-origin image access
@@ -132,7 +152,18 @@ app.locals.LIBRARY_DIR = LIBRARY_DIR;
 app.locals.WORKFLOWS_DIR = WORKFLOWS_DIR;
 app.locals.CHATS_DIR = CHATS_DIR;
 app.locals.LIBRARY_ASSETS_DIR = LIBRARY_ASSETS_DIR;
+app.locals.TASKS_DIR = TASKS_DIR;
+app.locals.TASK_ALLOWED_ORIGINS = ALLOWED_BROWSER_ORIGINS;
 app.locals.ROOT_DIR = path.join(__dirname, '..');
+
+const generationTaskManager = createGenerationTaskManager({
+    tasksDir: TASKS_DIR,
+    concurrency: Number(process.env.GENERATION_CONCURRENCY) || 2,
+    executor: task => executeGenerationTask(task, app.locals),
+    recoverInterruptedTask: task => recoverGenerationTaskOutput(task, app.locals)
+});
+app.locals.GENERATION_TASK_MANAGER = generationTaskManager;
+await generationTaskManager.initialize();
 
 // ============================================================================
 // WORKFLOW SANITIZATION HELPERS
@@ -472,6 +503,6 @@ if (process.env.NODE_ENV === 'production') {
     });
 }
 
-app.listen(PORT, () => {
-    console.log(`Backend server running on http://localhost:${PORT}`);
+app.listen(PORT, HOST, () => {
+    console.log(`Backend server running on http://${HOST}:${PORT}`);
 });

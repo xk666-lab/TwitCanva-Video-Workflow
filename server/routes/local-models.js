@@ -12,6 +12,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
+import { createMediaTake } from '../services/takeMetadata.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -455,93 +456,152 @@ router.get('/:id', async (req, res) => {
     }
 });
 
+export async function executeLocalImageGeneration(inputSnapshot, locals = {}) {
+    const { runLocalInference, checkInferenceAvailable } = await import('../services/local-inference.js');
+    const availability = await checkInferenceAvailable();
+    if (!availability.available) {
+        throw new Error(availability.error || 'Local inference is unavailable');
+    }
+
+    const {
+        nodeId,
+        generationTaskId,
+        modelId,
+        modelPath,
+        prompt,
+        negativePrompt,
+        aspectRatio,
+        resolution,
+        steps,
+        guidanceScale,
+        seed
+    } = inputSnapshot;
+
+    let finalModelPath = modelPath;
+    if (!finalModelPath && modelId) {
+        const models = await getCachedModels();
+        const model = models.find(candidate => candidate.id === modelId);
+        if (!model) throw new TypeError('Model not found');
+        finalModelPath = model.path;
+    }
+
+    if (!finalModelPath) throw new TypeError('Model path or modelId required');
+    if (!prompt) throw new TypeError('Prompt is required');
+
+    console.log(`[Local Models] Starting generation with model: ${path.basename(finalModelPath)}`);
+    const result = await runLocalInference({
+        modelPath: finalModelPath,
+        prompt,
+        negativePrompt,
+        aspectRatio,
+        resolution,
+        steps,
+        guidanceScale,
+        seed
+    });
+    if (!result.success || !result.resultUrl) {
+        throw new Error(result.error || 'Local image generation failed');
+    }
+
+    const createdAt = new Date().toISOString();
+    const take = createMediaTake({
+        nodeId: nodeId || path.basename(result.resultUrl),
+        type: 'image',
+        url: result.resultUrl,
+        prompt,
+        model: modelId || finalModelPath,
+        createdAt,
+        metadata: {
+            filename: path.basename(result.resultUrl),
+            modelType: result.modelType,
+            device: result.device,
+            local: true,
+            generationTaskId
+        }
+    });
+
+    if (locals.IMAGES_DIR) {
+        const metadata = {
+            id: take.id,
+            takeId: take.id,
+            nodeId: nodeId || take.nodeId,
+            filename: path.basename(result.resultUrl),
+            prompt,
+            model: modelId || finalModelPath,
+            createdAt,
+            type: 'images',
+            mediaType: 'image',
+            generationTaskId,
+            metadata: take.metadata
+        };
+        fsSync.writeFileSync(
+            path.join(locals.IMAGES_DIR, `${take.id}.json`),
+            JSON.stringify(metadata, null, 2)
+        );
+    }
+
+    return {
+        resultUrl: result.resultUrl,
+        take,
+        modelType: result.modelType,
+        device: result.device
+    };
+}
+
 /**
  * POST /api/local-models/generate
- * Generate an image using a local model
+ * Compatibility endpoint backed by the shared GenerationTask queue.
  */
 router.post('/generate', async (req, res) => {
     try {
-        const { runLocalInference, checkInferenceAvailable } = await import('../services/local-inference.js');
-
-        // Check if inference is available
-        const availability = await checkInferenceAvailable();
-        if (!availability.available) {
-            return res.status(503).json({
-                success: false,
-                error: availability.error
-            });
-        }
-
-        const {
-            modelId,
-            modelPath,
-            prompt,
-            negativePrompt,
-            aspectRatio,
-            resolution,
-            steps,
-            guidanceScale,
-            seed
-        } = req.body;
-
-        // Get model path from modelId if not provided directly
-        let finalModelPath = modelPath;
-        if (!finalModelPath && modelId) {
-            const models = await getCachedModels();
-            const model = models.find(m => m.id === modelId);
-            if (!model) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'Model not found'
-                });
+        const manager = req.app.locals.GENERATION_TASK_MANAGER;
+        if (!manager) throw new Error('Generation task manager is not initialized');
+        const model = req.body.modelId || req.body.modelPath || 'local-image-model';
+        const nodeId = req.body.nodeId || `legacy-local-${crypto.randomUUID()}`;
+        const { task } = await manager.submitTask({
+            workflowId: req.body.workflowId ?? null,
+            nodeId,
+            operation: 'generate-local-image',
+            provider: 'local',
+            model,
+            inputSnapshot: { ...req.body, nodeId },
+            parameters: {
+                modelId: req.body.modelId,
+                modelPath: req.body.modelPath,
+                aspectRatio: req.body.aspectRatio,
+                resolution: req.body.resolution,
+                steps: req.body.steps,
+                guidanceScale: req.body.guidanceScale,
+                seed: req.body.seed
             }
-            finalModelPath = model.path;
-        }
-
-        if (!finalModelPath) {
-            return res.status(400).json({
-                success: false,
-                error: 'Model path or modelId required'
-            });
-        }
-
-        if (!prompt) {
-            return res.status(400).json({
-                success: false,
-                error: 'Prompt is required'
-            });
-        }
-
-        console.log(`[Local Models] Starting generation with model: ${path.basename(finalModelPath)}`);
-
-        const result = await runLocalInference({
-            modelPath: finalModelPath,
-            prompt,
-            negativePrompt,
-            aspectRatio,
-            resolution,
-            steps,
-            guidanceScale,
-            seed
         });
-
-        if (result.success) {
-            res.json({
-                success: true,
-                resultUrl: result.resultUrl,
-                modelType: result.modelType,
-                device: result.device
-            });
-        } else {
-            res.status(500).json({
+        const terminalTask = await manager.waitForTask(task.taskId);
+        if (terminalTask.status !== 'succeeded' || !terminalTask.output?.resultUrl) {
+            const taskMessage = terminalTask.error?.message || 'Local generation failed';
+            const statusCode = terminalTask.status === 'cancelled'
+                ? 409
+                : /model not found/i.test(taskMessage)
+                    ? 404
+                    : terminalTask.error?.code === 'VALIDATION_ERROR'
+                        ? 400
+                        : /unavailable/i.test(taskMessage)
+                            ? 503
+                            : 500;
+            return res.status(statusCode).json({
                 success: false,
-                error: result.error
+                error: taskMessage,
+                task: terminalTask
             });
         }
 
+        return res.json({
+            success: true,
+            ...terminalTask.output,
+            task: terminalTask
+        });
     } catch (error) {
         console.error('Error in local generation:', error);
-        res.status(500).json({
+        return res.status(error instanceof TypeError ? 400 : 500).json({
             success: false,
             error: error.message
         });

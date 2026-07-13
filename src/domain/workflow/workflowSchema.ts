@@ -1,7 +1,7 @@
 import type { NodeData, NodeGroup, Viewport } from '../../types';
 import type { CanvasEdge } from '../graph/graphTypes';
 
-export const CURRENT_WORKFLOW_SCHEMA_VERSION = 3;
+export const CURRENT_WORKFLOW_SCHEMA_VERSION = 4;
 export const LEGACY_WORKFLOW_SCHEMA_VERSION = 1;
 
 export interface WorkflowData {

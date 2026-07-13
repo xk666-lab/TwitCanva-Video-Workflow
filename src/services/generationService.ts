@@ -7,8 +7,9 @@
  * - Video: Veo 3.1, Kling AI
  */
 
+import type { GenerationTask } from '../domain/generation/generationTask.ts';
 import type { MediaTake } from '../types';
-import { apiPost } from './apiClient';
+import { apiGet, apiPost } from './apiClient.ts';
 
 export interface GenerateImageParams {
   prompt: string;
@@ -47,23 +48,135 @@ const normalizeNetworkError = (error: unknown, mediaType: 'image' | 'video'): Er
 export interface GenerationResult {
   resultUrl: string;
   take?: MediaTake;
+  task: GenerationTask;
 }
+
+export interface GenerationRequestOptions {
+  workflowId?: string | null;
+  idempotencyKey?: string;
+  pollIntervalMs?: number;
+  onTaskCreated?: (task: GenerationTask) => void;
+}
+
+interface GenerationTaskResponse {
+  task: GenerationTask;
+  reused?: boolean;
+}
+
+interface GenerationTaskQueryResponse {
+  tasks: GenerationTask[];
+}
+
+export class GenerationTaskError extends Error {
+  task: GenerationTask;
+
+  constructor(task: GenerationTask) {
+    super(task.error?.message || `Generation task ${task.status}`);
+    this.name = 'GenerationTaskError';
+    this.task = task;
+  }
+}
+
+const isTerminalTask = (task: GenerationTask): boolean =>
+  task.status === 'succeeded' || task.status === 'failed' || task.status === 'cancelled';
+
+const delay = (milliseconds: number): Promise<void> =>
+  new Promise(resolve => setTimeout(resolve, milliseconds));
+
+export const getGenerationTask = async (taskId: string): Promise<GenerationTask> => {
+  const response = await apiGet<GenerationTaskResponse>(`/api/generation-tasks/${encodeURIComponent(taskId)}`);
+  return response.task;
+};
+
+export const queryGenerationTasks = async (filters: {
+  taskIds?: string[];
+  nodeIds?: string[];
+  workflowId?: string | null;
+  statuses?: GenerationTask['status'][];
+}): Promise<GenerationTask[]> => {
+  const response = await apiPost<GenerationTaskQueryResponse>('/api/generation-tasks/query', filters);
+  return response.tasks;
+};
+
+export const cancelGenerationTask = async (taskId: string): Promise<GenerationTask> => {
+  const response = await apiPost<GenerationTaskResponse>(
+    `/api/generation-tasks/${encodeURIComponent(taskId)}/cancel`
+  );
+  return response.task;
+};
+
+export const retryGenerationTask = async (taskId: string): Promise<GenerationTask> => {
+  const response = await apiPost<GenerationTaskResponse>(
+    `/api/generation-tasks/${encodeURIComponent(taskId)}/retry`
+  );
+  return response.task;
+};
+
+export const waitForGenerationTask = async (
+  taskId: string,
+  pollIntervalMs = 2000
+): Promise<GenerationTask> => {
+  while (true) {
+    const task = await getGenerationTask(taskId);
+    if (isTerminalTask(task)) return task;
+    await delay(Math.max(0, pollIntervalMs));
+  }
+};
+
+export async function submitGenerationTask(
+  operation: 'generate-image' | 'generate-video' | 'generate-local-image',
+  inputSnapshot: GenerateImageParams | GenerateVideoParams | Record<string, unknown>,
+  options: GenerationRequestOptions = {}
+): Promise<GenerationTask> {
+  const nodeId = typeof inputSnapshot.nodeId === 'string' ? inputSnapshot.nodeId : undefined;
+  const task = (await apiPost<GenerationTaskResponse>('/api/generation-tasks', {
+    workflowId: options.workflowId ?? null,
+    nodeId,
+    operation,
+    inputSnapshot,
+    idempotencyKey: options.idempotencyKey
+  })).task;
+
+  options.onTaskCreated?.(task);
+  return task;
+}
+
+export const submitImageGeneration = async (
+  params: GenerateImageParams,
+  options: GenerationRequestOptions = {}
+): Promise<GenerationTask> => {
+  const normalizedParams = {
+    ...params,
+    imageModel: params.imageModel === 'gpt-image-1.5' ? 'gpt-image-2' : params.imageModel
+  };
+  return submitGenerationTask('generate-image', normalizedParams, options);
+};
+
+export const submitVideoGeneration = (
+  params: GenerateVideoParams,
+  options: GenerationRequestOptions = {}
+): Promise<GenerationTask> => submitGenerationTask('generate-video', params, options);
 
 /**
  * Generates an image by calling the backend API
  */
-export const generateImage = async (params: GenerateImageParams): Promise<GenerationResult> => {
+export const generateImage = async (
+  params: GenerateImageParams,
+  options: GenerationRequestOptions = {}
+): Promise<GenerationResult> => {
   try {
-    const normalizedParams = {
-      ...params,
-      imageModel: params.imageModel === 'gpt-image-1.5' ? 'gpt-image-2' : params.imageModel
-    };
-
-    const data = await apiPost<GenerationResult>('/api/generate-image', normalizedParams);
-    if (!data.resultUrl) {
-      throw new Error("No image data returned from server");
+    const task = await submitImageGeneration(params, options);
+    const terminalTask = isTerminalTask(task)
+      ? task
+      : await waitForGenerationTask(task.taskId, options.pollIntervalMs);
+    if (terminalTask.status !== 'succeeded' || !terminalTask.output?.resultUrl) {
+      throw new GenerationTaskError(terminalTask);
     }
-    return data;
+    return {
+      resultUrl: terminalTask.output.resultUrl,
+      take: terminalTask.output.take,
+      task: terminalTask
+    };
 
   } catch (error) {
     console.error("Image Generation Error:", error);
@@ -74,13 +187,23 @@ export const generateImage = async (params: GenerateImageParams): Promise<Genera
 /**
  * Generates a video by calling the backend API
  */
-export const generateVideo = async (params: GenerateVideoParams): Promise<GenerationResult> => {
+export const generateVideo = async (
+  params: GenerateVideoParams,
+  options: GenerationRequestOptions = {}
+): Promise<GenerationResult> => {
   try {
-    const data = await apiPost<GenerationResult>('/api/generate-video', params);
-    if (!data.resultUrl) {
-      throw new Error("No video data returned from server");
+    const task = await submitVideoGeneration(params, options);
+    const terminalTask = isTerminalTask(task)
+      ? task
+      : await waitForGenerationTask(task.taskId, options.pollIntervalMs);
+    if (terminalTask.status !== 'succeeded' || !terminalTask.output?.resultUrl) {
+      throw new GenerationTaskError(terminalTask);
     }
-    return data;
+    return {
+      resultUrl: terminalTask.output.resultUrl,
+      take: terminalTask.output.take,
+      task: terminalTask
+    };
 
   } catch (error) {
     console.error("Video Generation Error:", error);

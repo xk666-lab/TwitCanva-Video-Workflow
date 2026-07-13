@@ -13,7 +13,7 @@ import { CanvasNode } from './components/canvas/CanvasNode';
 import { ConnectionsLayer } from './components/canvas/ConnectionsLayer';
 import { ContextMenu } from './components/ContextMenu';
 import { ContextMenuState, NodeData, NodeGroup, NodeStatus, NodeType } from './types';
-import { generateImage, generateVideo } from './services/generationService';
+import { submitImageGeneration } from './services/generationService';
 import { useCanvasNavigation } from './hooks/useCanvasNavigation';
 import { useNodeManagement } from './hooks/useNodeManagement';
 import { useConnectionDragging } from './hooks/useConnectionDragging';
@@ -35,7 +35,6 @@ import { useContextMenuHandlers } from './hooks/useContextMenuHandlers';
 import { useAutoSave } from './hooks/useAutoSave';
 import { useGenerationRecovery } from './hooks/useGenerationRecovery';
 import { useVideoFrameExtraction } from './hooks/useVideoFrameExtraction';
-import { appendHeroTake } from './utils/takeHelpers';
 import { createDefaultNodeData } from './domain/nodes/nodeRegistry';
 import { extractVideoLastFrame } from './utils/videoHelpers';
 import { SelectionBoundingBox } from './components/canvas/SelectionBoundingBox';
@@ -259,7 +258,7 @@ export default function App() {
 
   // Mark as dirty when nodes, edges, or title change
   const isInitialMount = React.useRef(true);
-  const lastLoadingCountRef = React.useRef(0);
+  const lastActiveTaskIdsRef = React.useRef('');
   const ignoreNextChange = React.useRef(false);
 
   React.useEffect(() => {
@@ -275,13 +274,19 @@ export default function App() {
 
     setIsDirty(true);
 
-    // Trigger immediate save if any node JUST entered LOADING state
-    const currentLoadingCount = nodes.filter(n => n.status === NodeStatus.LOADING).length;
-    if (currentLoadingCount > lastLoadingCountRef.current) {
-      console.log('[App] New loading node detected, triggering immediate save for recovery protection');
+    // Persist task references as soon as the backend assigns them.
+    const currentActiveTaskIds = nodes
+      .filter(node => node.activeTaskId)
+      .map(node => `${node.id}:${node.activeTaskId}`)
+      .sort()
+      .join(',');
+    const hasNewTaskReference = Boolean(currentActiveTaskIds)
+      && currentActiveTaskIds !== lastActiveTaskIdsRef.current;
+    if (hasNewTaskReference) {
+      console.log('[App] New generation task detected, triggering immediate save for recovery protection');
       handleSaveWithTracking();
     }
-    lastLoadingCountRef.current = currentLoadingCount;
+    lastActiveTaskIdsRef.current = currentActiveTaskIds;
   }, [nodes, edges, canvasTitle]);
 
   // Update saved state after workflow save
@@ -298,9 +303,10 @@ export default function App() {
     setIsDirty(false);
   };
 
-  const { handleGenerate } = useGeneration({
+  const { handleGenerate, handleCancelGeneration, handleRetryGeneration } = useGeneration({
     nodes,
     edges,
+    workflowId,
     updateNode
   });
 
@@ -1182,6 +1188,8 @@ export default function App() {
                 })()}
                 onUpdate={updateNodeWithSync}
                 onGenerate={handleGenerate}
+                onCancelGeneration={handleCancelGeneration}
+                onRetryGeneration={handleRetryGeneration}
                 onAddNext={handleAddNext}
                 selected={selectedNodeIds.includes(node.id)}
                 showControls={selectedNodeIds.length === 1 && selectedNodeIds.includes(node.id)}
@@ -1412,25 +1420,28 @@ export default function App() {
 
           newNodes.forEach(async (node) => {
             try {
-              const generationResult = await generateImage({
+              await submitImageGeneration({
                 prompt: node.prompt || '',
                 imageBase64: imageBase64,
                 imageModel: imageModel,
                 aspectRatio: aspectRatio,
                 resolution: resolution,
                 nodeId: node.id
-              });
-              const nodeWithTake = generationResult.take
-                ? appendHeroTake(node, generationResult.take)
-                : { ...node, resultUrl: generationResult.resultUrl };
-              updateNode(node.id, {
-                status: NodeStatus.SUCCESS,
-                resultUrl: nodeWithTake.resultUrl,
-                takes: nodeWithTake.takes,
-                heroTakeId: nodeWithTake.heroTakeId
+              }, {
+                workflowId,
+                onTaskCreated: task => updateNode(node.id, {
+                  status: NodeStatus.LOADING,
+                  activeTaskId: task.taskId,
+                  generationStartTime: Date.now()
+                })
               });
             } catch (error: any) {
-              updateNode(node.id, { status: NodeStatus.ERROR, errorMessage: error.message });
+              updateNode(node.id, {
+                status: NodeStatus.ERROR,
+                errorMessage: error.message,
+                activeTaskId: undefined,
+                generationStartTime: undefined
+              });
             }
           });
         }}

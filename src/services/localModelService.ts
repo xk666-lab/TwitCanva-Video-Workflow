@@ -5,6 +5,14 @@
  * Communicates with backend API to scan model directories and get GPU info.
  */
 
+import type { GenerationTask } from '../domain/generation/generationTask.ts';
+import type { MediaTake } from '../types';
+import {
+    submitGenerationTask,
+    waitForGenerationTask
+} from './generationService.ts';
+import type { GenerationRequestOptions } from './generationService.ts';
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -264,6 +272,7 @@ export const canRunModel = (model: LocalModel, availableVram: number): boolean =
  * Generate image params for local model
  */
 export interface GenerateLocalImageParams {
+    nodeId?: string;
     modelId?: string;
     modelPath?: string;
     prompt: string;
@@ -275,29 +284,51 @@ export interface GenerateLocalImageParams {
     seed?: number;
 }
 
+export const submitLocalImageGeneration = (
+    params: GenerateLocalImageParams,
+    options: GenerationRequestOptions = {}
+): Promise<GenerationTask> => submitGenerationTask('generate-local-image', params, options);
+
 /**
  * Generate an image using a local model
  * @param params - Generation parameters
  * @returns Promise<{success: boolean, resultUrl?: string, error?: string}>
  */
-export const generateLocalImage = async (params: GenerateLocalImageParams): Promise<{
+export const generateLocalImage = async (
+    params: GenerateLocalImageParams,
+    options: GenerationRequestOptions = {}
+): Promise<{
     success: boolean;
     resultUrl?: string;
     error?: string;
     modelType?: string;
     device?: string;
+    take?: MediaTake;
+    task?: GenerationTask;
 }> => {
     try {
-        const response = await fetch('/api/local-models/generate', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(params)
-        });
+        const task = await submitLocalImageGeneration(params, options);
 
-        const result = await response.json();
-        return result;
+        const terminalTask = task.status === 'succeeded' || task.status === 'failed' || task.status === 'cancelled'
+            ? task
+            : await waitForGenerationTask(task.taskId, options.pollIntervalMs);
+        if (terminalTask.status !== 'succeeded' || !terminalTask.output?.resultUrl) {
+            return {
+                success: false,
+                error: terminalTask.error?.message || 'Local generation failed',
+                task: terminalTask
+            };
+        }
+
+        const metadata = terminalTask.output.take?.metadata;
+        return {
+            success: true,
+            resultUrl: terminalTask.output.resultUrl,
+            take: terminalTask.output.take,
+            modelType: typeof metadata?.modelType === 'string' ? metadata.modelType : undefined,
+            device: typeof metadata?.device === 'string' ? metadata.device : undefined,
+            task: terminalTask
+        };
     } catch (error) {
         console.error('Error generating with local model:', error);
         return {

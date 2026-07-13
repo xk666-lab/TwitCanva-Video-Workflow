@@ -47,6 +47,7 @@ models/
 .shared/
 .codex-tools/
 .superpowers/
+.twitcanva/
 
 # Local analysis and planning caches
 .ua/

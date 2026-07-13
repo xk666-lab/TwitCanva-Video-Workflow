@@ -48,6 +48,8 @@ export interface NodeData {
   parentIds?: string[]; // For connecting lines (supports multiple inputs)
   groupId?: string; // ID of the group this node belongs to
   errorMessage?: string;
+  activeTaskId?: string; // Persisted task currently allowed to update this node
+  lastTaskId?: string; // Most recent terminal task, used for linked retry
 
   // Text node specific
   textMode?: 'menu' | 'editing'; // For Text nodes: current mode

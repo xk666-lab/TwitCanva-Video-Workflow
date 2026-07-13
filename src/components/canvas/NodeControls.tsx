@@ -7,7 +7,7 @@
  */
 
 import React, { useState, useRef, useEffect, memo } from 'react';
-import { Sparkles, Banana, Settings2, Check, ChevronDown, ChevronUp, GripVertical, Image as ImageIcon, Film, Clock, Expand, Shrink, Monitor, Crop, HardDrive } from 'lucide-react';
+import { Sparkles, Banana, Settings2, Check, ChevronDown, ChevronUp, GripVertical, Image as ImageIcon, Film, Clock, Expand, Shrink, Monitor, Crop, HardDrive, RotateCcw, Square } from 'lucide-react';
 import { NodeData, NodeStatus, NodeType } from '../../types';
 import { OpenAIIcon, GoogleIcon, KlingIcon, HailuoIcon } from '../icons/BrandIcons';
 import { useFaceDetection } from '../../hooks/useFaceDetection';
@@ -23,6 +23,8 @@ interface NodeControlsProps {
     connectedImageNodes?: { id: string; url: string; type?: NodeType }[]; // Connected parent nodes
     onUpdate: (id: string, updates: Partial<NodeData>) => void;
     onGenerate: (id: string) => void;
+    onCancelGeneration?: (id: string) => void;
+    onRetryGeneration?: (id: string) => void;
     onChangeAngleGenerate?: (nodeId: string) => void;
     onSelect: (id: string) => void;
     zoom: number;
@@ -172,6 +174,8 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     connectedImageNodes = [],
     onUpdate,
     onGenerate,
+    onCancelGeneration,
+    onRetryGeneration,
     onChangeAngleGenerate,
     onSelect,
     zoom,
@@ -1144,6 +1148,38 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                             </div>
                         )}
 
+                        {isLoading && data.activeTaskId && onCancelGeneration && (
+                            <button
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    onCancelGeneration(data.id);
+                                }}
+                                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-200 ${isDark
+                                    ? 'bg-red-500/15 text-red-300 hover:bg-red-500/25'
+                                    : 'bg-red-50 text-red-700 hover:bg-red-100'
+                                    }`}
+                                title="Request cancellation"
+                            >
+                                <Square size={13} fill="currentColor" />
+                            </button>
+                        )}
+
+                        {!isLoading && data.status === NodeStatus.ERROR && data.lastTaskId && onRetryGeneration && (
+                            <button
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    onRetryGeneration(data.id);
+                                }}
+                                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-200 ${isDark
+                                    ? 'bg-amber-500/15 text-amber-300 hover:bg-amber-500/25'
+                                    : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                                    }`}
+                                title="Retry previous task with its original inputs"
+                            >
+                                <RotateCcw size={15} />
+                            </button>
+                        )}
+
                         {/* Generate Button - Active even after success to allow re-generation */}
                         {!isLoading && (() => {
                             // Check if generation is blocked due to no face detected in Face mode
@@ -1169,7 +1205,11 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                             ? 'bg-white text-neutral-900 hover:bg-neutral-100 active:scale-95'
                                             : 'bg-neutral-900 text-white hover:bg-neutral-800 active:scale-95'
                                         }`}
-                                    title={isFaceModeBlocked ? 'Cannot generate: No face detected in reference image' : 'Generate'}
+                                    title={isFaceModeBlocked
+                                        ? 'Cannot generate: No face detected in reference image'
+                                        : data.status === NodeStatus.ERROR && data.lastTaskId
+                                            ? 'Generate with current settings'
+                                            : 'Generate'}
                                 >
                                     <svg
                                         viewBox="0 0 24 24"

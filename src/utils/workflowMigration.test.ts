@@ -27,6 +27,35 @@ test('new workflow payloads use the current schema version', () => {
   assert.equal(workflow.title, 'New Workflow');
 });
 
+test('task-aware workflows migrate to schema version 4 and preserve task references', () => {
+  const migrated = migrateWorkflow({
+    schemaVersion: 3,
+    id: 'workflow-task-aware',
+    title: 'Task aware',
+    nodes: [{
+      id: 'image-1',
+      type: '图片',
+      x: 0,
+      y: 0,
+      prompt: 'A paper city',
+      status: 'loading',
+      model: 'Banana Pro',
+      imageModel: 'gpt-image-2',
+      aspectRatio: '1:1',
+      resolution: '1K',
+      activeTaskId: 'task-current',
+      lastTaskId: 'task-previous'
+    }],
+    edges: [],
+    groups: [],
+    viewport: { x: 0, y: 0, zoom: 1 }
+  });
+
+  assert.equal(migrated.schemaVersion, 4);
+  assert.equal(migrated.nodes[0].activeTaskId, 'task-current');
+  assert.equal(migrated.nodes[0].lastTaskId, 'task-previous');
+});
+
 test('migrates a schema-less text workflow from version 1 to the current version', () => {
   const migrated = migrateWorkflow(fixture('legacy-text.json'));
 

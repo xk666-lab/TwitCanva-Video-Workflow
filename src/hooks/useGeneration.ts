@@ -5,12 +5,18 @@
  * Manages generation state, API calls, and error handling.
  */
 
-import { MediaTake, NodeData, NodeType, NodeStatus } from '../types';
-import { generateImage, generateVideo } from '../services/generationService';
-import { generateLocalImage } from '../services/localModelService';
-import { buildGenerationSuccessUpdate } from '../utils/takeHelpers';
+import { useRef } from 'react';
+import { NodeData, NodeType, NodeStatus } from '../types';
+import {
+    cancelGenerationTask,
+    retryGenerationTask,
+    submitImageGeneration,
+    submitVideoGeneration
+} from '../services/generationService';
+import type { GenerationRequestOptions } from '../services/generationService';
+import { submitLocalImageGeneration } from '../services/localModelService';
+import { buildGenerationTaskNodeUpdate } from '../utils/generationTaskHelpers';
 import { isSeedanceVideoModel } from '../utils/videoModelRouting';
-import { extractVideoLastFrame } from '../utils/videoHelpers';
 import type { CanvasEdge } from '../domain/graph/graphTypes';
 import {
     getConnectedImageInputs,
@@ -24,65 +30,13 @@ import {
 interface UseGenerationProps {
     nodes: NodeData[];
     edges: CanvasEdge[];
+    workflowId: string | null;
     updateNode: (id: string, updates: Partial<NodeData>) => void;
 }
 
-export const useGeneration = ({ nodes, edges, updateNode }: UseGenerationProps) => {
-    // ============================================================================
-    // HELPERS
-    // ============================================================================
-
-    /**
-     * Convert pixel dimensions to closest standard aspect ratio
-     */
-    const getClosestAspectRatio = (width: number, height: number): string => {
-        const ratio = width / height;
-        const standardRatios = [
-            { label: '1:1', value: 1 },
-            { label: '16:9', value: 16 / 9 },
-            { label: '9:16', value: 9 / 16 },
-            { label: '4:3', value: 4 / 3 },
-            { label: '3:4', value: 3 / 4 },
-            { label: '3:2', value: 3 / 2 },
-            { label: '2:3', value: 2 / 3 },
-            { label: '5:4', value: 5 / 4 },
-            { label: '4:5', value: 4 / 5 },
-            { label: '21:9', value: 21 / 9 }
-        ];
-
-        let closest = standardRatios[0];
-        let minDiff = Math.abs(ratio - closest.value);
-
-        for (const r of standardRatios) {
-            const diff = Math.abs(ratio - r.value);
-            if (diff < minDiff) {
-                minDiff = diff;
-                closest = r;
-            }
-        }
-
-        return closest.label;
-    };
-
-    /**
-     * Detect the actual aspect ratio of an image
-     * @param imageUrl - URL or base64 of the image
-     * @returns Promise with resultAspectRatio (exact) and aspectRatio (closest standard)
-     */
-    const getImageAspectRatio = (imageUrl: string): Promise<{ resultAspectRatio: string; aspectRatio: string }> => {
-        return new Promise((resolve) => {
-            const img = new Image();
-            img.onload = () => {
-                const resultAspectRatio = `${img.naturalWidth}/${img.naturalHeight}`;
-                const aspectRatio = getClosestAspectRatio(img.naturalWidth, img.naturalHeight);
-                resolve({ resultAspectRatio, aspectRatio });
-            };
-            img.onerror = () => {
-                resolve({ resultAspectRatio: '16/9', aspectRatio: '16:9' });
-            };
-            img.src = imageUrl;
-        });
-    };
+export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGenerationProps) => {
+    const nodesRef = useRef(nodes);
+    nodesRef.current = nodes;
 
     // ============================================================================
     // GENERATION HANDLER
@@ -97,6 +51,19 @@ export const useGeneration = ({ nodes, edges, updateNode }: UseGenerationProps) 
     const handleGenerate = async (id: string) => {
         const node = nodes.find(n => n.id === id);
         if (!node) return;
+        if (node.status === NodeStatus.LOADING && node.activeTaskId) return;
+
+        const generationRequestOptions: GenerationRequestOptions = {
+            workflowId,
+            onTaskCreated: task => {
+                updateNode(id, {
+                    status: NodeStatus.LOADING,
+                    activeTaskId: task.taskId,
+                    errorMessage: undefined,
+                    generationStartTime: Date.now()
+                });
+            }
+        };
 
         // Combine prompts: TEXT node prompts + node's own prompt
         const textNodePrompts = getConnectedTextInputs(node, nodes, edges)
@@ -149,7 +116,7 @@ export const useGeneration = ({ nodes, edges, updateNode }: UseGenerationProps) 
                 }
 
                 // Generate image with all parent images and character references
-                const generationResult = await generateImage({
+                await submitImageGeneration({
                     prompt: combinedPrompt,
                     aspectRatio: node.aspectRatio,
                     resolution: node.resolution,
@@ -160,18 +127,8 @@ export const useGeneration = ({ nodes, edges, updateNode }: UseGenerationProps) 
                     klingReferenceMode: node.klingReferenceMode,
                     klingFaceIntensity: node.klingFaceIntensity,
                     klingSubjectIntensity: node.klingSubjectIntensity
-                });
-
-                const resultUrl = generationResult.resultUrl;
-
-                // Detect actual image dimensions (for display purposes only)
-                const { resultAspectRatio } = await getImageAspectRatio(resultUrl);
-
-                updateNode(id, buildGenerationSuccessUpdate(node, generationResult, {
-                    resultAspectRatio,
-                    // Note: aspectRatio is intentionally NOT updated to preserve user's selection
-                }));
-
+                }, generationRequestOptions);
+                return;
 
             } else if (node.type === NodeType.LOCAL_IMAGE_MODEL) {
                 // --- LOCAL MODEL GENERATION ---
@@ -179,51 +136,22 @@ export const useGeneration = ({ nodes, edges, updateNode }: UseGenerationProps) 
                 if (!node.localModelId && !node.localModelPath) {
                     updateNode(id, {
                         status: NodeStatus.ERROR,
-                        errorMessage: 'No local model selected. Please select a model first.'
+                        errorMessage: 'No local model selected. Please select a model first.',
+                        lastTaskId: undefined,
+                        generationStartTime: undefined
                     });
                     return;
                 }
 
-                // Get parent images if any
-                const imageBase64s: string[] = [];
-                if (connectedImageInputs.length > 0) {
-                    for (const parent of connectedImageInputs) {
-                        if (parent.resultUrl) imageBase64s.push(parent.resultUrl);
-                    }
-                }
-
-                // Call local generation API
-                const result = await generateLocalImage({
+                await submitLocalImageGeneration({
+                    nodeId: id,
                     modelId: node.localModelId,
                     modelPath: node.localModelPath,
                     prompt: combinedPrompt,
                     aspectRatio: node.aspectRatio,
                     resolution: node.resolution || '512'
-                });
-
-                if (result.success && result.resultUrl) {
-                    const resultUrl = result.resultUrl;
-
-                    // Detect actual image dimensions
-                    const { resultAspectRatio } = await getImageAspectRatio(resultUrl);
-                    const take: MediaTake = {
-                        id: `take_${crypto.randomUUID()}`,
-                        nodeId: id,
-                        type: 'image',
-                        url: resultUrl,
-                        prompt: combinedPrompt,
-                        model: node.localModelId || node.localModelPath || 'local-image-model',
-                        createdAt: new Date().toISOString(),
-                        isHero: true,
-                        metadata: {
-                            modelType: result.modelType,
-                            device: result.device
-                        }
-                    };
-                    updateNode(id, buildGenerationSuccessUpdate(node, { resultUrl, take }, { resultAspectRatio }));
-                } else {
-                    throw new Error(result.error || 'Local generation failed');
-                }
+                }, generationRequestOptions);
+                return;
 
             } else if (node.type === NodeType.VIDEO) {
                 let imageBase64: string | string[] | undefined;
@@ -267,8 +195,7 @@ export const useGeneration = ({ nodes, edges, updateNode }: UseGenerationProps) 
                     }
                 }
 
-                // Generate video
-                const generationResult = await generateVideo({
+                await submitVideoGeneration({
                     prompt: combinedPrompt,
                     imageBase64,
                     lastFrameBase64,
@@ -279,37 +206,8 @@ export const useGeneration = ({ nodes, edges, updateNode }: UseGenerationProps) 
                     motionReferenceUrl,
                     generateAudio: node.generateAudio, // For Kling 2.6 and Veo 3.1 native audio
                     nodeId: id
-                });
-
-                const resultUrl = generationResult.resultUrl;
-
-                // Extract last frame for chaining
-                const lastFrame = await extractVideoLastFrame(resultUrl);
-
-                // Detect video aspect ratio
-                let resultAspectRatio: string | undefined;
-                let aspectRatio: string | undefined;
-                try {
-                    const video = document.createElement('video');
-                    await new Promise<void>((resolve) => {
-                        video.onloadedmetadata = () => {
-                            resultAspectRatio = `${video.videoWidth}/${video.videoHeight}`;
-                            aspectRatio = getClosestAspectRatio(video.videoWidth, video.videoHeight);
-                            resolve();
-                        };
-                        video.onerror = () => resolve();
-                        video.src = resultUrl;
-                    });
-                } catch (e) {
-                    // Ignore errors, use undefined aspect ratio
-                }
-
-                updateNode(id, buildGenerationSuccessUpdate(node, generationResult, {
-                    resultAspectRatio,
-                    aspectRatio,
-                    lastFrame,
-                }));
-
+                }, generationRequestOptions);
+                return;
 
             }
         } catch (error: any) {
@@ -323,8 +221,60 @@ export const useGeneration = ({ nodes, edges, updateNode }: UseGenerationProps) 
                 errorMessage = '⚠️ Input image incompatible. Veo requires: JPEG format, 16:9 or 9:16 aspect ratio. Try a different image or generate without input.';
             }
 
-            updateNode(id, { status: NodeStatus.ERROR, errorMessage, generationStartTime: undefined });
+            updateNode(id, {
+                status: NodeStatus.ERROR,
+                errorMessage,
+                lastTaskId: undefined,
+                generationStartTime: undefined
+            });
             console.error('Generation failed:', error);
+        }
+    };
+
+    const handleCancelGeneration = async (id: string) => {
+        const node = nodesRef.current.find(candidate => candidate.id === id);
+        const taskId = node?.activeTaskId;
+        if (!node || !taskId) return;
+
+        try {
+            const task = await cancelGenerationTask(taskId);
+            const current = nodesRef.current.find(candidate => candidate.id === id) || node;
+            if (current.activeTaskId && current.activeTaskId !== taskId) return;
+            const taskNode = { ...current, activeTaskId: taskId };
+            updateNode(id, buildGenerationTaskNodeUpdate(taskNode, task));
+        } catch (error) {
+            updateNode(id, {
+                status: NodeStatus.LOADING,
+                errorMessage: error instanceof Error ? error.message : 'Unable to request cancellation.'
+            });
+            console.error('Failed to cancel generation task:', error);
+        }
+    };
+
+    const handleRetryGeneration = async (id: string) => {
+        const node = nodesRef.current.find(candidate => candidate.id === id);
+        if (!node?.lastTaskId || node.status === NodeStatus.LOADING) return;
+
+        updateNode(id, {
+            status: NodeStatus.LOADING,
+            errorMessage: undefined,
+            generationStartTime: Date.now()
+        });
+        try {
+            const task = await retryGenerationTask(node.lastTaskId);
+            updateNode(id, {
+                status: NodeStatus.LOADING,
+                activeTaskId: task.taskId,
+                errorMessage: undefined,
+                generationStartTime: Date.now()
+            });
+        } catch (error) {
+            updateNode(id, {
+                status: NodeStatus.ERROR,
+                errorMessage: error instanceof Error ? error.message : 'Unable to retry generation.',
+                generationStartTime: undefined
+            });
+            console.error('Failed to retry generation task:', error);
         }
     };
 
@@ -333,6 +283,8 @@ export const useGeneration = ({ nodes, edges, updateNode }: UseGenerationProps) 
     // ============================================================================
 
     return {
-        handleGenerate
+        handleGenerate,
+        handleCancelGeneration,
+        handleRetryGeneration
     };
 };
