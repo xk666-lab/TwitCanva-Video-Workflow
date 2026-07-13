@@ -4,7 +4,7 @@
  * Service for managing assets (images/videos) via the backend API.
  */
 
-const API_BASE_URL = 'http://localhost:3001/api';
+import { apiPost } from './apiClient';
 
 /**
  * Uploads a base64 data URL to the server and returns the file path URL.
@@ -25,25 +25,11 @@ export const uploadAsset = async (
             return dataUrl;
         }
 
-        const endpoint = type === 'image' ? `${API_BASE_URL}/assets/images` : `${API_BASE_URL}/assets/videos`;
-
-        const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                data: dataUrl,
-                prompt: prompt
-            }),
+        const endpoint = type === 'image' ? '/api/assets/images' : '/api/assets/videos';
+        const result = await apiPost<{ url: string }>(endpoint, {
+            data: dataUrl,
+            prompt: prompt
         });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to upload asset');
-        }
-
-        const result = await response.json();
         return result.url;
     } catch (error) {
         console.error('Asset upload failed:', error);

@@ -45,3 +45,9 @@ models/
 # Agent workflows and shared utilities
 .agent/
 .shared/
+.codex-tools/
+.superpowers/
+
+# Local analysis and planning caches
+.ua/
+.planning/

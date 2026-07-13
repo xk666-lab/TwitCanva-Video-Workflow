@@ -38,6 +38,14 @@ export const StoryInput: React.FC<StoryInputProps> = ({
             .replace(/'/g, "&#039;");
     };
 
+    const safeImageUrl = (url: string) => {
+        const value = String(url || '').trim();
+        if (/^(https?:\/\/|\/|data:image\/)/i.test(value)) {
+            return escapeHtml(value);
+        }
+        return '';
+    };
+
     // Convert plain text to HTML with chips
     const textToHtml = useCallback((text: string) => {
         if (!text) return '';
@@ -50,20 +58,22 @@ export const StoryInput: React.FC<StoryInputProps> = ({
             const exactMention = `@${asset.name}`;
             const normalizedName = asset.name.replace(/\s+/g, '');
             const normalizedMention = `@${normalizedName}`;
+            const escapedExactMention = escapeHtml(exactMention);
+            const escapedNormalizedMention = escapeHtml(normalizedMention);
 
             // Create pattern to match either exact or normalized (space-stripped) variation
             // Escape special chars in name
-            const escExact = exactMention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const escNorm = normalizedMention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const escExact = escapedExactMention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const escNorm = escapedNormalizedMention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
             // Regex: (@Exact Name|@ExactName) followed by boundary
             // We use a capture group so we can replace strictly what matched
             const regex = new RegExp(`(${escExact}|${escNorm})(?=\\s|$|\\.|,|!|\\?)`, 'g');
 
             const chipHtml = `
-<span class="inline-flex items-center gap-1.5 align-middle bg-violet-500/10 border border-violet-500/30 rounded px-1.5 py-0.5 mx-0.5 select-none" contenteditable="false" data-mention="${exactMention}">
-<img src="${asset.url}" class="w-4 h-4 rounded-sm object-cover" />
-<span class="text-violet-300 font-medium text-xs">${exactMention}</span>
+<span class="inline-flex items-center gap-1.5 align-middle bg-violet-500/10 border border-violet-500/30 rounded px-1.5 py-0.5 mx-0.5 select-none" contenteditable="false" data-mention="${escapedExactMention}">
+<img src="${safeImageUrl(asset.url)}" class="w-4 h-4 rounded-sm object-cover" />
+<span class="text-violet-300 font-medium text-xs">${escapedExactMention}</span>
 </span>`.trim().replace(/\n/g, '');
 
             html = html.replace(regex, chipHtml);

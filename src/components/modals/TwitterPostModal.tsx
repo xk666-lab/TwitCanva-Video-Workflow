@@ -7,6 +7,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Loader2, CheckCircle, AlertCircle, Send, ExternalLink, LogOut } from 'lucide-react';
+import { apiGet, apiPost } from '../../services/apiClient';
 
 // ============================================================================
 // TYPES
@@ -23,6 +24,19 @@ interface TwitterUser {
     id: string;
     username: string;
     name: string;
+}
+
+interface TwitterStatusResponse {
+    authenticated: boolean;
+    user?: TwitterUser;
+}
+
+interface TwitterAuthResponse {
+    authUrl: string;
+}
+
+interface TwitterPostResponse {
+    tweetUrl: string;
 }
 
 type PostStatus = 'idle' | 'authenticating' | 'posting' | 'success' | 'error';
@@ -114,8 +128,7 @@ export const TwitterPostModal: React.FC<TwitterPostModalProps> = ({
 
     const checkAuthStatus = async (session: string) => {
         try {
-            const response = await fetch(`http://localhost:3001/api/twitter/status?sessionId=${session}`);
-            const data = await response.json();
+            const data = await apiGet<TwitterStatusResponse>(`/api/twitter/status?sessionId=${session}`);
 
             if (data.authenticated && data.user) {
                 setUser(data.user);
@@ -137,12 +150,7 @@ export const TwitterPostModal: React.FC<TwitterPostModalProps> = ({
         setError(null);
 
         try {
-            const response = await fetch('http://localhost:3001/api/twitter/auth');
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || 'Failed to start authentication');
-            }
+            const data = await apiGet<TwitterAuthResponse>('/api/twitter/auth');
 
             // Open OAuth popup
             const popup = window.open(
@@ -165,8 +173,7 @@ export const TwitterPostModal: React.FC<TwitterPostModalProps> = ({
     const handleLogout = async () => {
         if (sessionId) {
             try {
-                await fetch('http://localhost:3001/api/twitter/logout', {
-                    method: 'POST',
+                await apiPost('/api/twitter/logout', undefined, {
                     headers: { 'X-Twitter-Session': sessionId }
                 });
             } catch (err) {
@@ -201,20 +208,11 @@ export const TwitterPostModal: React.FC<TwitterPostModalProps> = ({
                 body.mediaType = mediaType;
             }
 
-            const response = await fetch('http://localhost:3001/api/twitter/post', {
-                method: 'POST',
+            const data = await apiPost<TwitterPostResponse>('/api/twitter/post', body, {
                 headers: {
-                    'Content-Type': 'application/json',
                     'X-Twitter-Session': sessionId
-                },
-                body: JSON.stringify(body)
+                }
             });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || 'Failed to post tweet');
-            }
 
             setTweetUrl(data.tweetUrl);
             setStatus('success');
@@ -238,7 +236,7 @@ export const TwitterPostModal: React.FC<TwitterPostModalProps> = ({
     // Build the full media URL for display
     const fullMediaUrl = mediaUrl?.startsWith('http')
         ? mediaUrl
-        : `http://localhost:3001${mediaUrl}`;
+        : `${mediaUrl}`;
 
     return (
         <div

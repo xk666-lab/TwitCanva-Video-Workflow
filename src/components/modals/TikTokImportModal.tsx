@@ -1,16 +1,13 @@
 /**
  * TikTokImportModal.tsx
- * 
+ *
  * Modal overlay for importing TikTok videos without watermark.
  * Allows users to paste a TikTok URL and download the video to the canvas.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-import { X, Download, Loader2, CheckCircle, AlertCircle, Link2 } from 'lucide-react';
-
-// ============================================================================
-// TYPES
-// ============================================================================
+import React, { useEffect, useRef, useState } from 'react';
+import { AlertCircle, CheckCircle, Download, Link2, Loader2, X } from 'lucide-react';
+import { apiPost } from '../../services/apiClient';
 
 interface TikTokImportModalProps {
     isOpen: boolean;
@@ -28,16 +25,20 @@ export interface TikTokVideoInfo {
 
 type ImportStatus = 'idle' | 'loading' | 'success' | 'error';
 
-// ============================================================================
-// COMPONENT
-// ============================================================================
+interface TikTokImportResponse {
+    videoUrl: string;
+    title?: string;
+    author?: string;
+    duration?: number;
+    cover?: string | null;
+    trimmed?: boolean;
+}
 
 export const TikTokImportModal: React.FC<TikTokImportModalProps> = ({
     isOpen,
     onClose,
     onVideoImported
 }) => {
-    // --- State ---
     const [url, setUrl] = useState('');
     const [status, setStatus] = useState<ImportStatus>('idle');
     const [error, setError] = useState<string | null>(null);
@@ -46,16 +47,12 @@ export const TikTokImportModal: React.FC<TikTokImportModalProps> = ({
 
     const inputRef = useRef<HTMLInputElement>(null);
 
-    // --- Effects ---
-
-    // Focus input when modal opens
     useEffect(() => {
         if (isOpen) {
             setTimeout(() => inputRef.current?.focus(), 100);
         }
     }, [isOpen]);
 
-    // Reset state when modal closes
     useEffect(() => {
         if (!isOpen) {
             setUrl('');
@@ -66,11 +63,9 @@ export const TikTokImportModal: React.FC<TikTokImportModalProps> = ({
         }
     }, [isOpen]);
 
-    // --- Event Handlers ---
-
     const handleImport = async () => {
         if (!url.trim()) {
-            setError('Please enter a TikTok URL');
+            setError('Please paste a TikTok URL.');
             return;
         }
 
@@ -78,34 +73,25 @@ export const TikTokImportModal: React.FC<TikTokImportModalProps> = ({
         setError(null);
 
         try {
-            const response = await fetch('http://localhost:3001/api/tiktok/import', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: url.trim(), enableTrim: true })
+            const data = await apiPost<TikTokImportResponse>('/api/tiktok/import', {
+                url: url.trim(),
+                enableTrim: true
             });
 
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || 'Failed to import video');
-            }
-
-            // Success!
             const info: TikTokVideoInfo = {
-                title: data.title || 'TikTok Video',
-                author: data.author || 'Unknown',
+                title: data.title || 'TikTok video',
+                author: data.author || 'Unknown author',
                 duration: data.duration || 0,
                 cover: data.cover || null,
-                trimmed: data.trimmed || false
+                trimmed: Boolean(data.trimmed)
             };
 
             setVideoInfo(info);
             setImportedVideoUrl(data.videoUrl);
             setStatus('success');
-
         } catch (err: any) {
-            console.error('TikTok import error:', err);
-            setError(err.message || 'Failed to import video');
+            console.error('TikTok import failed:', err);
+            setError(err.message || 'Failed to import TikTok video');
             setStatus('error');
         }
     };
@@ -125,8 +111,6 @@ export const TikTokImportModal: React.FC<TikTokImportModalProps> = ({
         }
     };
 
-    // --- Render ---
-
     if (!isOpen) return null;
 
     return (
@@ -135,8 +119,6 @@ export const TikTokImportModal: React.FC<TikTokImportModalProps> = ({
             onClick={(e) => e.target === e.currentTarget && onClose()}
         >
             <div className="bg-[#121212] border border-neutral-800 rounded-2xl w-[500px] shadow-2xl overflow-hidden">
-
-                {/* Header */}
                 <div className="flex items-center justify-between p-4 border-b border-neutral-800">
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#ff0050] via-[#00f2ea] to-[#ff0050] flex items-center justify-center">
@@ -146,7 +128,7 @@ export const TikTokImportModal: React.FC<TikTokImportModalProps> = ({
                         </div>
                         <div>
                             <h2 className="text-lg font-semibold text-white">Import TikTok Video</h2>
-                            <p className="text-xs text-neutral-400">Download without watermark</p>
+                            <p className="text-xs text-neutral-400">Paste a TikTok link to save it to the canvas.</p>
                         </div>
                     </div>
                     <button
@@ -157,12 +139,10 @@ export const TikTokImportModal: React.FC<TikTokImportModalProps> = ({
                     </button>
                 </div>
 
-                {/* Content */}
                 <div className="p-6">
-                    {/* URL Input */}
                     <div className="space-y-3">
                         <label className="text-sm font-medium text-neutral-300">
-                            TikTok Video URL
+                            TikTok video link
                         </label>
                         <div className="relative">
                             <Link2 size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
@@ -172,17 +152,16 @@ export const TikTokImportModal: React.FC<TikTokImportModalProps> = ({
                                 value={url}
                                 onChange={(e) => setUrl(e.target.value)}
                                 onKeyDown={handleKeyDown}
-                                placeholder="Paste TikTok video URL here (Ctrl+V)"
+                                placeholder="Paste a TikTok link here"
                                 disabled={status === 'loading' || status === 'success'}
                                 className="w-full bg-[#1a1a1a] border border-neutral-700 rounded-lg pl-10 pr-4 py-3 text-white placeholder-neutral-500 focus:outline-none focus:border-[#00f2ea] transition-colors disabled:opacity-50"
                             />
                         </div>
                         <p className="text-xs text-neutral-500">
-                            Supports tiktok.com, vm.tiktok.com, and vt.tiktok.com links
+                            Supports tiktok.com, vm.tiktok.com, and vt.tiktok.com links.
                         </p>
                     </div>
 
-                    {/* Error Message */}
                     {error && status === 'error' && (
                         <div className="mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg flex items-start gap-3">
                             <AlertCircle size={20} className="text-red-400 flex-shrink-0 mt-0.5" />
@@ -201,36 +180,33 @@ export const TikTokImportModal: React.FC<TikTokImportModalProps> = ({
                         </div>
                     )}
 
-                    {/* Loading State */}
                     {status === 'loading' && (
                         <div className="mt-6 flex flex-col items-center gap-3 py-4">
                             <Loader2 size={32} className="text-[#00f2ea] animate-spin" />
                             <p className="text-neutral-400 text-sm">Downloading video...</p>
-                            <p className="text-neutral-500 text-xs">This may take a moment</p>
+                            <p className="text-neutral-500 text-xs">This can take a few moments.</p>
                         </div>
                     )}
 
-                    {/* Success State */}
                     {status === 'success' && videoInfo && importedVideoUrl && (
                         <div className="mt-6 space-y-4">
                             <div className="flex items-start gap-3 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
                                 <CheckCircle size={20} className="text-green-400 flex-shrink-0 mt-0.5" />
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-sm text-green-400 font-medium">Video downloaded successfully!</p>
+                                    <p className="text-sm text-green-400 font-medium">Video imported successfully</p>
                                     <p className="text-xs text-neutral-400 mt-1 truncate" title={videoInfo.title}>
                                         {videoInfo.title}
                                     </p>
                                     <p className="text-xs text-neutral-500">
-                                        By @{videoInfo.author} • {Math.round(videoInfo.duration)}s
-                                        {videoInfo.trimmed && ' • Trimmed'}
+                                        By @{videoInfo.author} | {Math.round(videoInfo.duration)}s
+                                        {videoInfo.trimmed && ' | Trimmed'}
                                     </p>
                                 </div>
                             </div>
 
-                            {/* Video Preview */}
                             <div className="aspect-video bg-black rounded-lg overflow-hidden">
                                 <video
-                                    src={`http://localhost:3001${importedVideoUrl}`}
+                                    src={importedVideoUrl}
                                     className="w-full h-full object-contain"
                                     controls
                                     autoPlay
@@ -241,7 +217,6 @@ export const TikTokImportModal: React.FC<TikTokImportModalProps> = ({
                     )}
                 </div>
 
-                {/* Footer */}
                 <div className="p-4 border-t border-neutral-800 flex justify-end gap-2">
                     <button
                         onClick={onClose}
@@ -256,7 +231,7 @@ export const TikTokImportModal: React.FC<TikTokImportModalProps> = ({
                             className="flex items-center gap-2 px-6 py-2 bg-[#00f2ea] hover:bg-[#00d4d4] text-black font-medium rounded-lg transition-colors"
                         >
                             <CheckCircle size={18} />
-                            Add to Canvas
+                            Add to canvas
                         </button>
                     ) : (
                         <button
@@ -272,7 +247,7 @@ export const TikTokImportModal: React.FC<TikTokImportModalProps> = ({
                             ) : (
                                 <>
                                     <Download size={18} />
-                                    Import Video
+                                    Import video
                                 </>
                             )}
                         </button>

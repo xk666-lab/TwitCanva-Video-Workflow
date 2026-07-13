@@ -1,4 +1,4 @@
-/**
+﻿/**
  * PromptBar.tsx
  * 
  * Prompt input bar with model, aspect ratio, and resolution dropdowns.
@@ -120,7 +120,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                 {showModelDropdown && (
                     <div className="absolute bottom-full mb-2 left-0 w-48 bg-[#252525] border border-neutral-700 rounded-lg shadow-xl overflow-hidden z-50">
                         <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider bg-[#1a1a1a] border-b border-neutral-700">
-                            {hasInputImage ? 'Image → Image' : 'Text → Image'}
+                            {hasInputImage ? '\u56fe\u7247\u8f6c\u56fe\u7247' : '\u6587\u672c\u8f6c\u56fe\u7247'}
                         </div>
                         {availableModels.filter(m => m.provider === 'openai').length > 0 && (
                             <>
@@ -191,7 +191,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                 type="text"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Describe the changes you want to make..."
+                placeholder="\u63cf\u8ff0\u4f60\u60f3\u505a\u7684\u4fee\u6539..."
                 className="flex-1 min-w-0 bg-transparent text-sm text-neutral-200 placeholder-neutral-500 outline-none"
             />
 
@@ -209,7 +209,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
 
                     {showAspectDropdown && (
                         <div className="absolute bottom-full mb-2 right-0 w-28 bg-[#252525] border border-neutral-700 rounded-lg shadow-xl overflow-hidden z-50 max-h-60 overflow-y-auto">
-                            <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f]">Size</div>
+                            <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f]">\u6bd4\u4f8b</div>
                             {(currentModel.aspectRatios || []).map(ratio => (
                                 <button
                                     key={ratio}
@@ -236,7 +236,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
 
                     {showResolutionDropdown && (
                         <div className="absolute bottom-full mb-2 right-0 w-24 bg-[#252525] border border-neutral-700 rounded-lg shadow-xl overflow-hidden z-50">
-                            <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f]">Quality</div>
+                            <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f]">\u6e05\u6670\u5ea6</div>
                             {(currentModel.resolutions || ['1K']).map(res => (
                                 <button
                                     key={res}
@@ -257,13 +257,13 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                         className="hover:text-white disabled:opacity-50"
                         onClick={() => setBatchCount(Math.max(1, batchCount - 1))}
                         disabled={batchCount <= 1}
-                    >‹</button>
+                    >-</button>
                     <span className="w-3 text-center">{batchCount}</span>
                     <button
                         className="hover:text-white disabled:opacity-50"
                         onClick={() => setBatchCount(Math.min(4, batchCount + 1))}
                         disabled={batchCount >= 4}
-                    >›</button>
+                    >+</button>
                 </div>
 
                 {/* Generate Button */}
@@ -274,7 +274,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
                         <path d="M12 2v20M2 12h20" />
                     </svg>
-                    Generate
+                    {"\u751f\u6210"}
                 </button>
             </div>
         </div>

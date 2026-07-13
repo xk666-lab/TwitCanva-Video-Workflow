@@ -7,6 +7,9 @@
 
 import express from 'express';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { requestChatCompletion } from '../services/openaiChat.js';
+import { generateStoryPackage } from '../services/storyboardText.js';
+import { generateOpenAIImage } from '../services/openai.js';
 
 const router = express.Router();
 
@@ -31,9 +34,131 @@ async function retryOperation(operation, maxRetries = 3, initialDelayMs = 2000) 
     }
 }
 
+function normalizeTextReferences({ characterDescriptions = [], referenceImages = [] }) {
+    if (Array.isArray(characterDescriptions) && characterDescriptions.length > 0) {
+        return characterDescriptions.map(character => ({
+            name: character.name,
+            description: [
+                character.description,
+                character.category ? `category: ${character.category}` : ''
+            ].filter(Boolean).join('; ') || 'Reference asset'
+        }));
+    }
+
+    if (Array.isArray(referenceImages) && referenceImages.length > 0) {
+        return referenceImages.map(reference => ({
+            name: reference.name,
+            description: `${reference.category || 'Reference'} visual asset selected from the canvas library`
+        }));
+    }
+
+    return [];
+}
+
+function createOpenAIStoryboardRequester(req) {
+    const {
+        OPENAI_API_KEY,
+        OPENAI_BASE_URL,
+        OPENAI_TEXT_MODEL,
+        OPENAI_CHAT_COMPLETIONS_PATH
+    } = req.app.locals;
+
+    if (!OPENAI_API_KEY) return null;
+
+    return (messages) => requestChatCompletion({
+        messages,
+        apiKey: OPENAI_API_KEY,
+        baseURL: OPENAI_BASE_URL,
+        model: OPENAI_TEXT_MODEL,
+        chatCompletionsPath: OPENAI_CHAT_COMPLETIONS_PATH
+    });
+}
+
+function createGeminiStoryboardRequester(req) {
+    const { GEMINI_API_KEY } = req.app.locals;
+    if (!GEMINI_API_KEY) return null;
+
+    return async (messages) => {
+        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+        const prompt = messages
+            .map(message => `${message.role.toUpperCase()}:\n${message.content}`)
+            .join('\n\n');
+        const result = await retryOperation(() => model.generateContent(prompt));
+        return result.response.text();
+    };
+}
+
+async function generateStoryPackageWithConfiguredProvider(req, payload) {
+    const openAIRequester = createOpenAIStoryboardRequester(req);
+    if (openAIRequester) {
+        const packageResult = await generateStoryPackage({
+            ...payload,
+            requestText: openAIRequester
+        });
+        return { ...packageResult, provider: 'openai' };
+    }
+
+    const geminiRequester = createGeminiStoryboardRequester(req);
+    if (geminiRequester) {
+        const packageResult = await generateStoryPackage({
+            ...payload,
+            requestText: geminiRequester
+        });
+        return { ...packageResult, provider: 'gemini' };
+    }
+
+    throw new Error('No text generation API key configured. Add OPENAI_API_KEY or GEMINI_API_KEY to .env');
+}
+
 // ============================================================================
 // SCRIPT GENERATION
 // ============================================================================
+
+/**
+ * Generate a full story package: polished story + storyboard scripts + visual anchors.
+ *
+ * POST /api/storyboard/generate-story-package
+ * Body: { story, characterDescriptions?, referenceImages?, sceneCount?, tone? }
+ */
+router.post('/generate-story-package', async (req, res) => {
+    try {
+        const {
+            story,
+            characterDescriptions,
+            referenceImages,
+            sceneCount = 4,
+            tone
+        } = req.body;
+
+        if (!story || typeof story !== 'string') {
+            return res.status(400).json({
+                error: "Missing required field: story"
+            });
+        }
+
+        const count = parseInt(sceneCount, 10);
+        if (isNaN(count) || count < 1 || count > 10) {
+            return res.status(400).json({
+                error: "sceneCount must be between 1 and 10"
+            });
+        }
+
+        console.log(`[Storyboard] Generating story package with ${count} scenes`);
+
+        const packageResult = await generateStoryPackageWithConfiguredProvider(req, {
+            story,
+            sceneCount: count,
+            tone,
+            characterDescriptions: normalizeTextReferences({ characterDescriptions, referenceImages })
+        });
+
+        return res.json(packageResult);
+    } catch (error) {
+        console.error("[Storyboard] Story Package Generation Error:", error);
+        res.status(500).json({ error: error.message || "Story package generation failed" });
+    }
+});
 
 /**
  * Generate storyboard scripts using Gemini LLM
@@ -46,13 +171,6 @@ router.post('/generate-scripts', async (req, res) => {
     try {
         const { story, characterDescriptions, sceneCount, referenceImages, characterImages } = req.body;
         const { GEMINI_API_KEY } = req.app.locals;
-        const { resolveImageToBase64 } = await import('../utils/imageHelpers.js');
-
-        if (!GEMINI_API_KEY) {
-            return res.status(500).json({
-                error: "Gemini API key not configured. Add GEMINI_API_KEY to .env"
-            });
-        }
 
         if (!story || !sceneCount) {
             return res.status(400).json({
@@ -69,6 +187,34 @@ router.post('/generate-scripts', async (req, res) => {
         }
 
         console.log(`[Storyboard] Generating ${count} scene scripts`);
+
+        const openAIRequester = createOpenAIStoryboardRequester(req);
+        if (openAIRequester) {
+            const packageResult = await generateStoryPackage({
+                story,
+                sceneCount: count,
+                characterDescriptions: normalizeTextReferences({ characterDescriptions, referenceImages }),
+                requestText: openAIRequester
+            });
+
+            console.log(`[Storyboard] Generated ${packageResult.scripts.length} scripts with OpenAI-compatible text model`);
+
+            return res.json({
+                scripts: packageResult.scripts,
+                styleAnchor: packageResult.styleAnchor,
+                characterDNA: packageResult.characterDNA,
+                story: packageResult.story,
+                provider: 'openai'
+            });
+        }
+
+        if (!GEMINI_API_KEY) {
+            return res.status(500).json({
+                error: "No text generation API key configured. Add OPENAI_API_KEY or GEMINI_API_KEY to .env"
+            });
+        }
+
+        const { resolveImageToBase64 } = await import('../utils/imageHelpers.js');
 
         // Initialize Gemini
         const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
@@ -317,13 +463,35 @@ router.post('/brainstorm-story', async (req, res) => {
     try {
         const { characterDescriptions, genre, referenceImages, characterImages } = req.body;
         const { GEMINI_API_KEY } = req.app.locals;
-        const { resolveImageToBase64 } = await import('../utils/imageHelpers.js');
 
         if (!GEMINI_API_KEY) {
+            const openAIRequester = createOpenAIStoryboardRequester(req);
+            if (openAIRequester) {
+                const textReferences = normalizeTextReferences({ characterDescriptions, referenceImages });
+                const characterContext = textReferences.length > 0
+                    ? textReferences.map((c, i) => `${i + 1}. ${c.name}: ${c.description}`).join('\n')
+                    : 'Create original characters as needed.';
+                const genreHint = genre ? `\nGenre preference: ${genre}` : '';
+                const story = await openAIRequester([
+                    {
+                        role: 'system',
+                        content: 'You are a visual storyteller for an AI video director canvas. Respond in Simplified Chinese with only the story synopsis.'
+                    },
+                    {
+                        role: 'user',
+                        content: `Create a concise 3-5 sentence visual story synopsis for storyboard generation.\n\nCharacters / references:\n${characterContext}${genreHint}`
+                    }
+                ]);
+
+                return res.json({ story, provider: 'openai' });
+            }
+
             return res.status(500).json({
-                error: "Gemini API key not configured. Add GEMINI_API_KEY to .env"
+                error: "No text generation API key configured. Add OPENAI_API_KEY or GEMINI_API_KEY to .env"
             });
         }
+
+        const { resolveImageToBase64 } = await import('../utils/imageHelpers.js');
 
         console.log(`[Storyboard] Brainstorming story with ${characterDescriptions?.length || 0} characters`);
 
@@ -430,15 +598,31 @@ router.post('/optimize-story', async (req, res) => {
         const { story, characterNames } = req.body;
         const { GEMINI_API_KEY } = req.app.locals;
 
-        if (!GEMINI_API_KEY) {
-            return res.status(500).json({
-                error: "Gemini API key not configured. Add GEMINI_API_KEY to .env"
-            });
-        }
-
         if (!story || typeof story !== 'string') {
             return res.status(400).json({
                 error: "Missing required field: story"
+            });
+        }
+
+        if (!GEMINI_API_KEY) {
+            const openAIRequester = createOpenAIStoryboardRequester(req);
+            if (openAIRequester) {
+                const optimizedStory = await openAIRequester([
+                    {
+                        role: 'system',
+                        content: 'You are an expert storyboard writer. Respond in Simplified Chinese with only the optimized story text.'
+                    },
+                    {
+                        role: 'user',
+                        content: `Rewrite this story idea for AI storyboard generation. Keep the original core, add vivid visual details, keep it under 150 words, and use @Name mentions for these characters when relevant: ${characterNames && characterNames.length > 0 ? characterNames.join(', ') : 'None'}.\n\nOriginal story:\n${story}`
+                    }
+                ]);
+
+                return res.json({ optimizedStory, provider: 'openai' });
+            }
+
+            return res.status(500).json({
+                error: "No text generation API key configured. Add OPENAI_API_KEY or GEMINI_API_KEY to .env"
             });
         }
 
@@ -491,19 +675,28 @@ Respond with ONLY the optimized story text.`;
  */
 router.post('/generate-composite', async (req, res) => {
     try {
-        const { scripts, styleAnchor, characterDNA, sceneCount, referenceImages, characterImages } = req.body;
-        const { GEMINI_API_KEY } = req.app.locals;
+        const { scripts, styleAnchor, characterDNA, sceneCount, referenceImages, characterImages, imageModel } = req.body;
+        const { GEMINI_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_IMAGE_MODEL } = req.app.locals;
         const { resolveImageToBase64 } = await import('../utils/imageHelpers.js');
-
-        if (!GEMINI_API_KEY) {
-            return res.status(500).json({
-                error: "Gemini API key not configured. Add GEMINI_API_KEY to .env"
-            });
-        }
 
         if (!scripts || scripts.length === 0) {
             return res.status(400).json({
                 error: "Missing required field: scripts"
+            });
+        }
+
+        const selectedImageModel = imageModel || OPENAI_IMAGE_MODEL || 'gpt-image-2';
+        const useOpenAIImage = selectedImageModel.startsWith('gpt-image-');
+
+        if (useOpenAIImage && !OPENAI_API_KEY) {
+            return res.status(500).json({
+                error: "OpenAI API key not configured. Add OPENAI_API_KEY to .env"
+            });
+        }
+
+        if (!useOpenAIImage && !GEMINI_API_KEY) {
+            return res.status(500).json({
+                error: "Gemini API key not configured. Add GEMINI_API_KEY to .env"
             });
         }
 
@@ -692,7 +885,7 @@ router.post('/generate-composite', async (req, res) => {
             return `Panel ${i + 1}: ${cleanDesc}. Camera: ${script.cameraAngle}. Mood: ${script.mood}.`;
         }).join('\n');
 
-        console.log('[Storyboard] Panel Descriptions Being Sent to Gemini:');
+        console.log(`[Storyboard] Panel Descriptions Being Sent to ${useOpenAIImage ? 'GPT Image' : 'Gemini'}:`);
         console.log(panelDescriptions.substring(0, 500) + '...');
 
         // FORCE UNIFORM aspect ratio and layout
@@ -728,9 +921,42 @@ CRITICAL:
 3. LABELING: ADD A VISIBLE, HIGH-CONTRAST WHITE NUMBER (1, ${count > 1 ? '2, ' : ''}...) in the corner of each panel.`;
 
         console.log(`[Storyboard] Composite prompt preview: ${compositePrompt.substring(0, 100)}...`);
-        console.log(`[Storyboard] Sending request to Gemini... Parts: ${promptParts.length + 1}`);
+        console.log(`[Storyboard] Sending request to ${useOpenAIImage ? selectedImageModel : 'Gemini'}... Parts: ${promptParts.length + 1}`);
 
         promptParts.push({ text: compositePrompt });
+
+        if (useOpenAIImage) {
+            const referenceBase64Array = promptParts
+                .filter(part => part.inlineData?.data)
+                .map(part => `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`);
+
+            const imagePrompt = promptParts
+                .filter(part => part.text)
+                .map(part => part.text)
+                .join('\n\n');
+
+            const imageBuffer = await generateOpenAIImage({
+                prompt: imagePrompt,
+                imageBase64Array: referenceBase64Array.length > 0 ? referenceBase64Array : undefined,
+                aspectRatio: '1536x1024',
+                resolution: '1K',
+                apiKey: OPENAI_API_KEY,
+                baseURL: OPENAI_BASE_URL,
+                model: selectedImageModel
+            });
+
+            const timestamp = Date.now();
+            const fileName = `storyboard_composite_${timestamp}.png`;
+            const fs = await import('fs/promises');
+            const path = await import('path');
+            const assetsDir = req.app.locals.IMAGES_DIR || './library/images';
+            const filePath = path.join(assetsDir, fileName);
+
+            await fs.writeFile(filePath, imageBuffer);
+            const imageUrl = `/library/images/${fileName}`;
+            console.log(`[Storyboard] GPT Image composite saved: ${imageUrl}`);
+            return res.json({ imageUrl });
+        }
 
         // Initialize Gemini for image generation
         const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);

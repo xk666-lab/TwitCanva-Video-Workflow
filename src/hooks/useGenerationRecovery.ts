@@ -7,6 +7,8 @@
 
 import { useEffect, useCallback, useRef } from 'react';
 import { NodeData, NodeStatus } from '../types';
+import { apiGet } from '../services/apiClient';
+import { buildGenerationSuccessUpdate } from '../utils/takeHelpers';
 import { extractVideoLastFrame } from '../utils/videoHelpers';
 
 interface UseGenerationRecoveryOptions {
@@ -24,45 +26,43 @@ export const useGenerationRecovery = ({
 
     const checkStatus = useCallback(async (nodeId: string) => {
         try {
-            const response = await fetch(`/api/generation-status/${nodeId}`);
-            if (response.ok) {
-                const data = await response.json();
-                if (data.status === 'success' && data.resultUrl) {
-                    // Access nodes via ref to avoid stale closure
-                    const node = nodesRef.current.find(n => n.id === nodeId);
+            const data = await apiGet<any>(`/api/generation-status/${nodeId}`);
+            if (data.status === 'success' && data.resultUrl) {
+                // Access nodes via ref to avoid stale closure
+                const node = nodesRef.current.find(n => n.id === nodeId);
 
-                    // Race condition check: If node has a generationStartTime, compare with result's createdAt
-                    // This prevents applying stale results from previous generations
-                    if (node?.generationStartTime && data.createdAt) {
-                        const resultCreatedAt = new Date(data.createdAt).getTime();
-                        if (resultCreatedAt < node.generationStartTime) {
-                            // Stale result, skip silently (don't spam console)
-                            return;
-                        }
+                // Race condition check: If node has a generationStartTime, compare with result's createdAt
+                // This prevents applying stale results from previous generations
+                if (node?.generationStartTime && data.createdAt) {
+                    const resultCreatedAt = new Date(data.createdAt).getTime();
+                    if (resultCreatedAt < node.generationStartTime) {
+                        // Stale result, skip silently (don't spam console)
+                        return;
                     }
+                }
 
-                    console.log(`[Recovery] Found new result for node ${nodeId}`);
+                console.log(`[Recovery] Found new result for node ${nodeId}`);
 
-                    // Update node with success status and result URL
-                    const updates: Partial<NodeData> = {
+                const updates: Partial<NodeData> = node
+                    ? buildGenerationSuccessUpdate(node, { resultUrl: data.resultUrl, take: data.take })
+                    : {
                         status: NodeStatus.SUCCESS,
                         resultUrl: data.resultUrl,
                         errorMessage: undefined,
-                        generationStartTime: undefined // Clear the timestamp after successful recovery
+                        generationStartTime: undefined
                     };
 
-                    // If it's a video, extract the last frame for chaining
-                    if (data.type === 'video') {
-                        try {
-                            const lastFrame = await extractVideoLastFrame(data.resultUrl);
-                            updates.lastFrame = lastFrame;
-                        } catch (err) {
-                            console.error(`[Recovery] Failed to extract last frame for node ${nodeId}:`, err);
-                        }
+                // If it's a video, extract the last frame for chaining
+                if (data.type === 'video') {
+                    try {
+                        const lastFrame = await extractVideoLastFrame(data.resultUrl);
+                        updates.lastFrame = lastFrame;
+                    } catch (err) {
+                        console.error(`[Recovery] Failed to extract last frame for node ${nodeId}:`, err);
                     }
-
-                    updateNode(nodeId, updates);
                 }
+
+                updateNode(nodeId, updates);
             }
         } catch (error) {
             console.error(`[Recovery] Error checking status for node ${nodeId}:`, error);

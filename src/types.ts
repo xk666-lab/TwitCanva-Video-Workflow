@@ -1,16 +1,16 @@
 
 export enum NodeType {
-  TEXT = 'Text',
-  IMAGE = 'Image',
-  VIDEO = 'Video',
-  AUDIO = 'Audio',
-  IMAGE_EDITOR = 'Image Editor',
-  VIDEO_EDITOR = 'Video Editor',
-  STORYBOARD = 'Storyboard Manager',
-  CAMERA_ANGLE = 'Camera Angle',
+  TEXT = '文本',
+  IMAGE = '图片',
+  VIDEO = '视频',
+  AUDIO = '音频',
+  IMAGE_EDITOR = '图片编辑器',
+  VIDEO_EDITOR = '视频编辑器',
+  STORYBOARD = '分镜管理器',
+  CAMERA_ANGLE = '镜头角度',
   // Local open-source model nodes
-  LOCAL_IMAGE_MODEL = 'Local Image Model',
-  LOCAL_VIDEO_MODEL = 'Local Video Model'
+  LOCAL_IMAGE_MODEL = '本地图片模型',
+  LOCAL_VIDEO_MODEL = '本地视频模型'
 }
 
 export enum NodeStatus {
@@ -18,6 +18,19 @@ export enum NodeStatus {
   LOADING = 'loading',
   SUCCESS = 'success',
   ERROR = 'error'
+}
+
+export interface MediaTake {
+  id: string;
+  nodeId: string;
+  type: 'image' | 'video';
+  url: string;
+  prompt: string;
+  model: string;
+  createdAt: string;
+  isHero: boolean;
+  thumbnailUrl?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface NodeData {
@@ -29,6 +42,8 @@ export interface NodeData {
   prompt: string;
   status: NodeStatus;
   resultUrl?: string; // Image URL or Video URL
+  takes?: MediaTake[]; // Generated versions for this node; resultUrl remains the legacy hero URL
+  heroTakeId?: string; // Currently selected take that downstream nodes should read
   lastFrame?: string; // For Video nodes: base64/url of the last frame to use as input for next node
   parentIds?: string[]; // For connecting lines (supports multiple inputs)
   groupId?: string; // ID of the group this node belongs to
@@ -142,5 +157,6 @@ export interface NodeGroup {
     styleAnchor?: string;
     characterDNA?: Record<string, string>;
     compositeImageUrl?: string | null;
+    selectedImageModel?: string;
   };
 }

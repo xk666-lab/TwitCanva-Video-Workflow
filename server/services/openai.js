@@ -1,7 +1,7 @@
 /**
  * openai.js
  * 
- * Service for OpenAI GPT Image generation (gpt-image-1.5).
+ * Service for OpenAI GPT Image generation (gpt-image-2).
  * Uses the Image API for both text-to-image (generations) and 
  * image-to-image (edits) generation.
  */
@@ -19,7 +19,7 @@ import OpenAI, { toFile } from 'openai';
  */
 function mapAspectRatioToSize(aspectRatio) {
     const sizeMap = {
-        // Pixel sizes (new format for GPT Image 1.5)
+        // Pixel sizes used by GPT Image models
         '1024x1024': '1024x1024',
         '1536x1024': '1536x1024',
         '1024x1536': '1024x1536',
@@ -82,15 +82,23 @@ async function base64ToFile(base64Data, filename = 'image.png') {
  * @param {string} [params.aspectRatio] - Aspect ratio (1:1, 16:9, 9:16, Auto)
  * @param {string} [params.resolution] - Resolution/quality setting (1K, 2K, 4K, Auto)
  * @param {string} params.apiKey - OpenAI API key
+ * @param {string} [params.baseURL] - OpenAI-compatible API base URL
+ * @param {string} [params.model] - Image model name
  * @returns {Promise<Buffer>} Image buffer
  */
-export async function generateOpenAIImage({ prompt, imageBase64Array, aspectRatio, resolution, apiKey }) {
-    const openai = new OpenAI({ apiKey });
+export async function generateOpenAIImage({ prompt, imageBase64Array, aspectRatio, resolution, apiKey, baseURL, model }) {
+    const timeout = Number(process.env.OPENAI_IMAGE_TIMEOUT_MS || 600000);
+    const openai = new OpenAI({
+        apiKey,
+        timeout,
+        ...(baseURL ? { baseURL } : {})
+    });
+    const imageModel = model || process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
 
     const size = mapAspectRatioToSize(aspectRatio);
     const quality = mapResolutionToQuality(resolution);
 
-    console.log(`[OpenAI] Generating image with gpt-image-1.5, size: ${size}, quality: ${quality}`);
+    console.log(`[OpenAI] Generating image with ${imageModel}, size: ${size}, quality: ${quality}`);
 
     // Use edits endpoint if input images provided, otherwise generations
     if (imageBase64Array && imageBase64Array.length > 0) {
@@ -106,7 +114,7 @@ export async function generateOpenAIImage({ prompt, imageBase64Array, aspectRati
 
         // Build request options
         const editOptions = {
-            model: 'gpt-image-1.5',
+            model: imageModel,
             image: imageFiles.length === 1 ? imageFiles[0] : imageFiles,
             prompt,
             quality: quality === 'auto' ? undefined : quality,
@@ -129,7 +137,7 @@ export async function generateOpenAIImage({ prompt, imageBase64Array, aspectRati
 
         // Build request options
         const generateOptions = {
-            model: 'gpt-image-1.5',
+            model: imageModel,
             prompt,
             quality: quality === 'auto' ? undefined : quality,
         };

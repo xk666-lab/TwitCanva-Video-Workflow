@@ -7,6 +7,9 @@
  * - Video: Veo 3.1, Kling AI
  */
 
+import type { MediaTake } from '../types';
+import { apiPost } from './apiClient';
+
 export interface GenerateImageParams {
   prompt: string;
   aspectRatio?: string;
@@ -22,7 +25,7 @@ export interface GenerateImageParams {
 
 export interface GenerateVideoParams {
   prompt: string;
-  imageBase64?: string; // For Image-to-Video (start frame)
+  imageBase64?: string | string[]; // For Image-to-Video references
   lastFrameBase64?: string; // For frame-to-frame interpolation (end frame)
   aspectRatio?: string;
   resolution?: string; // Add resolution to params
@@ -33,58 +36,54 @@ export interface GenerateVideoParams {
   nodeId?: string; // ID of the node initiating generation
 }
 
+const normalizeNetworkError = (error: unknown, mediaType: 'image' | 'video'): Error => {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/failed to fetch|networkerror|load failed/i.test(message)) {
+    return new Error(`Unable to reach the local backend while generating ${mediaType}. Check that the backend on port 3001 is still running.`);
+  }
+  return error instanceof Error ? error : new Error(message);
+};
+
+export interface GenerationResult {
+  resultUrl: string;
+  take?: MediaTake;
+}
+
 /**
  * Generates an image by calling the backend API
  */
-export const generateImage = async (params: GenerateImageParams): Promise<string> => {
+export const generateImage = async (params: GenerateImageParams): Promise<GenerationResult> => {
   try {
-    const response = await fetch('/api/generate-image', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params)
-    });
+    const normalizedParams = {
+      ...params,
+      imageModel: params.imageModel === 'gpt-image-1.5' ? 'gpt-image-2' : params.imageModel
+    };
 
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      throw new Error(errData.error || response.statusText);
-    }
-
-    const data = await response.json();
+    const data = await apiPost<GenerationResult>('/api/generate-image', normalizedParams);
     if (!data.resultUrl) {
       throw new Error("No image data returned from server");
     }
-    return data.resultUrl;
+    return data;
 
   } catch (error) {
     console.error("Image Generation Error:", error);
-    throw error;
+    throw normalizeNetworkError(error, 'image');
   }
 };
 
 /**
  * Generates a video by calling the backend API
  */
-export const generateVideo = async (params: GenerateVideoParams): Promise<string> => {
+export const generateVideo = async (params: GenerateVideoParams): Promise<GenerationResult> => {
   try {
-    const response = await fetch('/api/generate-video', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params)
-    });
-
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      throw new Error(errData.error || response.statusText);
-    }
-
-    const data = await response.json();
+    const data = await apiPost<GenerationResult>('/api/generate-video', params);
     if (!data.resultUrl) {
       throw new Error("No video data returned from server");
     }
-    return data.resultUrl;
+    return data;
 
   } catch (error) {
     console.error("Video Generation Error:", error);
-    throw error;
+    throw normalizeNetworkError(error, 'video');
   }
 };

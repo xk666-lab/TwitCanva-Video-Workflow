@@ -8,6 +8,7 @@
 import React from 'react';
 import { NodeData, NodeType, NodeStatus } from '../types';
 import { generateCameraAngle } from '../services/cameraAngleService';
+import { DEFAULT_SEEDANCE_VIDEO_MODEL_ID } from '../utils/videoModelRouting';
 
 // ============================================================================
 // TYPES
@@ -50,7 +51,8 @@ export const useImageNodeHandlers = ({
             y: imageNode.y,
             prompt: '',
             status: NodeStatus.IDLE,
-            model: 'Banana Pro',
+            model: imageNode.imageModel || 'gpt-image-2',
+            imageModel: imageNode.imageModel || 'gpt-image-2',
             aspectRatio: 'Auto',
             resolution: 'Auto',
             parentIds: [nodeId] // Connect to the source image node
@@ -81,7 +83,8 @@ export const useImageNodeHandlers = ({
             y: imageNode.y,
             prompt: '',
             status: NodeStatus.IDLE,
-            model: 'Banana Pro',
+            model: DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
+            videoModel: DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
             aspectRatio: 'Auto',
             resolution: 'Auto',
             parentIds: [nodeId] // Connect to the source image node

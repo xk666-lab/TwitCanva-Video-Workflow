@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Search, Filter, Trash2 } from 'lucide-react';
+import { apiDelete, apiGet } from '../services/apiClient';
 
 interface LibraryAsset {
     id: string;
@@ -22,10 +23,10 @@ const CATEGORIES = [
     'All',
     'Character',
     'Scene',
-    'Item',
+    'Prop',
     'Style',
-    'Sound Effect',
-    'Others'
+    'Reference',
+    'Other'
 ];
 
 export const AssetLibraryPanel: React.FC<AssetLibraryPanelProps> = ({
@@ -49,12 +50,9 @@ export const AssetLibraryPanel: React.FC<AssetLibraryPanelProps> = ({
     const fetchLibrary = async () => {
         setLoading(true);
         try {
-            const res = await fetch('http://localhost:3001/api/library'); // Adjust port if needed, relative path preferred in helper
-            if (res.ok) {
-                setAssets(await res.json());
-            }
+            setAssets(await apiGet<LibraryAsset[]>('/api/library'));
         } catch (error) {
-            console.error("Failed to load library:", error);
+            console.error("Failed to fetch asset library:", error);
         } finally {
             setLoading(false);
         }
@@ -65,16 +63,10 @@ export const AssetLibraryPanel: React.FC<AssetLibraryPanelProps> = ({
         // Confirmation is now handled in the UI before this is called
 
         try {
-            const res = await fetch(`http://localhost:3001/api/library/${id}`, {
-                method: 'DELETE'
-            });
-            if (res.ok) {
-                setAssets(prev => prev.filter(a => a.id !== id));
-            } else {
-                console.error("Failed to delete asset");
-            }
+            await apiDelete(`/api/library/${id}`);
+            setAssets(prev => prev.filter(a => a.id !== id));
         } catch (error) {
-            console.error("Delete error:", error);
+            console.error("Failed to delete asset:", error);
         }
     };
 
@@ -91,7 +83,7 @@ export const AssetLibraryPanel: React.FC<AssetLibraryPanelProps> = ({
                     onClick={(e) => e.stopPropagation()}
                 >
                     <div className={`flex items-center justify-between p-4 border-b ${isDark ? 'border-neutral-800' : 'border-neutral-200'}`}>
-                        <h2 className={`text-lg font-medium pl-2 ${isDark ? 'text-white' : 'text-neutral-900'}`}>Asset Library</h2>
+                        <h2 className="text-lg font-medium pl-2">Asset Library</h2>
                         <button onClick={onClose} className={`p-2 rounded-lg transition-colors ${isDark ? 'hover:bg-neutral-800 text-neutral-400 hover:text-white' : 'hover:bg-neutral-100 text-neutral-500 hover:text-neutral-900'}`}>
                             <X size={20} />
                         </button>
@@ -189,10 +181,10 @@ const AssetLibraryContent = ({
                     }}
                 >
                     {loading ? (
-                        <div className="col-span-full text-center py-10 text-neutral-500">Loading...</div>
+                        <div className="col-span-full text-center py-10 text-neutral-500">正在加载素材...</div>
                     ) : filteredAssets.length === 0 ? (
                         <div className="col-span-full text-center py-10 text-neutral-500 text-sm">
-                            No assets found in this category.
+                            暂无素材。你可以先从画布节点保存素材，或上传图片/视频到素材库。
                         </div>
                     ) : (
                         filteredAssets.map((asset: any) => (
@@ -219,19 +211,19 @@ const AssetLibraryContent = ({
                                 {/* Delete Button or Confirmation */}
                                 {deleteConfirmId === asset.id ? (
                                     <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-2 z-20 animate-in fade-in duration-200" onClick={(e) => e.stopPropagation()}>
-                                        <span className="text-white text-xs font-medium">Delete?</span>
+                                        <span className="text-white text-xs font-medium">Delete this asset?</span>
                                         <div className="flex gap-2">
                                             <button
                                                 className="px-2 py-1 bg-red-500 hover:bg-red-600 text-white text-xs rounded transition-colors"
                                                 onClick={(e) => handleConfirmDelete(e, asset.id)}
                                             >
-                                                Yes
+                                                Delete
                                             </button>
                                             <button
                                                 className="px-2 py-1 bg-neutral-700 hover:bg-neutral-600 text-white text-xs rounded transition-colors"
                                                 onClick={handleCancelDelete}
                                             >
-                                                No
+                                                Cancel
                                             </button>
                                         </div>
                                     </div>
@@ -239,7 +231,7 @@ const AssetLibraryContent = ({
                                     <button
                                         className="absolute top-1 right-1 p-1.5 bg-black/60 text-white rounded-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500/80 z-10"
                                         onClick={(e) => handleDeleteClick(e, asset.id)}
-                                        title="Delete Asset"
+                                        title="Delete asset"
                                     >
                                         <Trash2 size={14} />
                                     </button>

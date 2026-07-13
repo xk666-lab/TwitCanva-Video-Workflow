@@ -8,6 +8,8 @@
 
 import React, { useState, useCallback } from 'react';
 import { NodeData, NodeType, NodeStatus, Viewport, ContextMenuState } from '../types';
+import { apiPost } from '../services/apiClient';
+import { DEFAULT_SEEDANCE_VIDEO_MODEL_ID } from '../utils/videoModelRouting';
 
 interface UseAssetHandlersOptions {
     nodes: NodeData[];
@@ -96,8 +98,9 @@ export const useAssetHandlers = ({
                 status: NodeStatus.SUCCESS,
                 resultUrl: url,
                 resultAspectRatio,
-                model: isVideo ? 'veo-3.1' : 'imagen-3.0-generate-002',
-                videoModel: isVideo ? 'veo-3.1' : undefined,
+                model: isVideo ? DEFAULT_SEEDANCE_VIDEO_MODEL_ID : 'gpt-image-2',
+                videoModel: isVideo ? DEFAULT_SEEDANCE_VIDEO_MODEL_ID : undefined,
+                imageModel: isVideo ? undefined : 'gpt-image-2',
                 aspectRatio: aspectRatio || '16:9',
                 resolution: isVideo ? 'Auto' : '1024x1024'
             };
@@ -150,7 +153,7 @@ export const useAssetHandlers = ({
         handleSelectAsset(
             type === 'image' ? 'images' : 'videos',
             url,
-            'Asset Library Item',
+            'Library asset',
             closeHistoryPanel,
             closeAssetLibrary
         );
@@ -165,7 +168,7 @@ export const useAssetHandlers = ({
             setNodeToSnapshot(node);
             setIsCreateAssetModalOpen(true);
         } else {
-            alert("Please select an Image or Video node to create an asset.");
+            alert("Please select an image or video node first.");
         }
     }, [nodes]);
 
@@ -176,19 +179,13 @@ export const useAssetHandlers = ({
         if (!nodeToSnapshot?.resultUrl) return;
 
         try {
-            const response = await fetch('http://localhost:3001/api/library', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    sourceUrl: nodeToSnapshot.resultUrl,
-                    name: name,
-                    category: category
-                })
+            await apiPost('/api/library', {
+                sourceUrl: nodeToSnapshot.resultUrl,
+                name: name,
+                category: category
             });
-
-            if (!response.ok) throw new Error('Failed to save');
         } catch (error) {
-            console.error("Failed to save asset:", error);
+            console.error("Failed to save asset to library:", error);
             throw error;
         }
     }, [nodeToSnapshot]);
@@ -206,7 +203,7 @@ export const useAssetHandlers = ({
 
         // Check file size (server limit 100MB)
         if (file.size > 100 * 1024 * 1024) {
-            alert("File is too large. Maximum size is 100MB.");
+            alert("File size exceeds 100MB.");
             return;
         }
 
@@ -216,20 +213,10 @@ export const useAssetHandlers = ({
 
             try {
                 const type = isVideo ? 'videos' : 'images';
-                const response = await fetch(`/api/assets/${type}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        data: base64Data,
-                        prompt: file.name
-                    })
+                const responseData = await apiPost<{ url: string }>(`/api/assets/${type}`, {
+                    data: base64Data,
+                    prompt: file.name
                 });
-
-                if (!response.ok) {
-                    throw new Error('Upload failed');
-                }
-
-                const responseData = await response.json();
                 const resultUrl = responseData.url;
 
                 // Convert screen/menu coordinates to canvas coordinates
@@ -277,6 +264,8 @@ export const useAssetHandlers = ({
                         resultUrl: resultUrl,
                         resultAspectRatio,
                         model: 'Upload',
+                        imageModel: isImage ? 'gpt-image-2' : undefined,
+                        videoModel: isVideo ? DEFAULT_SEEDANCE_VIDEO_MODEL_ID : undefined,
                         aspectRatio,
                         resolution: 'Auto',
                     };

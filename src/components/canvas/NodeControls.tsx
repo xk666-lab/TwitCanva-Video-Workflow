@@ -13,6 +13,7 @@ import { OpenAIIcon, GoogleIcon, KlingIcon, HailuoIcon } from '../icons/BrandIco
 import { useFaceDetection } from '../../hooks/useFaceDetection';
 import { ChangeAnglePanel } from './ChangeAnglePanel';
 import { LocalModel, getLocalModels } from '../../services/localModelService';
+import { DEFAULT_SEEDANCE_VIDEO_MODEL_ID, isSeedanceVideoModel as isSeedanceVideoModelId } from '../../utils/videoModelRouting';
 
 interface NodeControlsProps {
     data: NodeData;
@@ -50,6 +51,7 @@ const VIDEO_ASPECT_RATIOS = ["16:9", "9:16"];
 
 const VIDEO_MODELS = [
     { id: 'veo-3.1', name: 'Veo 3.1', provider: 'google', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, durations: [4, 6, 8], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
+    { id: DEFAULT_SEEDANCE_VIDEO_MODEL_ID, name: 'Seedance 2.0', provider: 'seedance', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, durations: [5, 10], resolutions: ['720p'], aspectRatios: ['16:9', '9:16'] },
     // Kling AI models - Consolidated: removed legacy v1, v1-5, v1-6, v2-master
     { id: 'kling-v2-1', name: 'Kling V2.1', provider: 'kling', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, recommended: true, durations: [5, 10], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
     { id: 'kling-v2-1-master', name: 'Kling V2.1 Master', provider: 'kling', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, durations: [5, 10], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
@@ -70,8 +72,8 @@ const VIDEO_MODELS = [
 // aspectRatios: Supported aspect ratios for the model
 const IMAGE_MODELS = [
     {
-        id: 'gpt-image-1.5',
-        name: 'GPT Image 1.5',
+        id: 'gpt-image-2',
+        name: 'GPT Image 2',
         provider: 'openai',
         supportsImageToImage: true,
         supportsMultiImage: true,
@@ -285,11 +287,14 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     }, []);
 
     // Auto-open Advanced Settings when:
-    // 1. 2+ images are connected to a video node (frame-to-frame)
-    // 2. Kling 2.6 with an input image (has audio toggle)
+    // 1. Seedance has reference images
+    // 2. 2+ images are connected to a video node (frame-to-frame)
+    // 3. Kling 2.6 with an input image (has audio toggle)
     useEffect(() => {
         if (data.type === NodeType.VIDEO) {
-            const shouldAutoExpand = connectedImageNodes.length >= 2 ||
+            const isSeedanceModel = isSeedanceVideoModelId(data.videoModel);
+            const shouldAutoExpand = (isSeedanceModel && connectedImageNodes.length > 0) ||
+                connectedImageNodes.length >= 2 ||
                 (data.videoModel === 'kling-v2-6' && connectedImageNodes.length > 0);
             if (shouldAutoExpand) {
                 setShowAdvanced(true);
@@ -370,8 +375,11 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     const hasConnectedImages = connectedImageNodes.length > 0;
 
     // Video model selection logic
-    const currentVideoModel = VIDEO_MODELS.find(m => m.id === data.videoModel) || VIDEO_MODELS[0];
-    const isFrameToFrame = data.videoMode === 'frame-to-frame';
+    const currentVideoModel = VIDEO_MODELS.find(m => m.id === data.videoModel)
+        || (isSeedanceVideoModelId(data.videoModel) ? VIDEO_MODELS.find(m => m.provider === 'seedance') : undefined)
+        || VIDEO_MODELS[0];
+    const isSeedanceVideoModel = currentVideoModel.provider === 'seedance';
+    const isFrameToFrame = data.videoMode === 'frame-to-frame' && !isSeedanceVideoModel;
 
     // Determine video generation mode based on inputs and settings
     // 1. Motion Control: If any parent is a video node
@@ -382,6 +390,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     const imageInputCount = connectedImageNodes.filter(n => n.type === NodeType.IMAGE).length;
 
     const videoGenerationMode = hasVideoParent ? 'motion-control'
+        : (isSeedanceVideoModel && imageInputCount > 0) ? 'reference-to-video'
         : (isFrameToFrame || imageInputCount >= 2) ? 'frame-to-frame'
             : (inputUrl || imageInputCount > 0) ? 'image-to-video'
                 : 'text-to-video';
@@ -390,6 +399,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     const availableVideoModels = VIDEO_MODELS.filter(model => {
         if (videoGenerationMode === 'motion-control') return model.id === 'kling-v2-6'; // Only Kling 2.6 for now
         if (videoGenerationMode === 'text-to-video') return model.supportsTextToVideo;
+        if (videoGenerationMode === 'reference-to-video') return model.supportsImageToVideo;
         if (videoGenerationMode === 'image-to-video') return model.supportsImageToVideo;
         return model.supportsMultiImage; // frame-to-frame
     });
@@ -408,9 +418,10 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
         const newModel = VIDEO_MODELS.find(m => m.id === modelId);
         const updates: Partial<typeof data> = { videoModel: modelId };
 
-        // Reset duration if current duration is not supported by new model
+        // Reset duration if current duration is not supported by new model.
+        // Seedance uses prompt-inferred duration, so it should not carry over a manual value.
         if (newModel?.durations && data.videoDuration && !newModel.durations.includes(data.videoDuration)) {
-            updates.videoDuration = newModel.durations[0];
+            updates.videoDuration = undefined;
         }
 
         // Reset resolution if current resolution is not supported by new model
@@ -423,13 +434,26 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
             }
         }
 
+        if (newModel?.provider === 'seedance') {
+            updates.videoMode = 'standard';
+            updates.frameInputs = undefined;
+            updates.videoDuration = undefined;
+        }
+
         onUpdate(data.id, updates);
         setShowModelDropdown(false);
     };
 
-    // Get available durations for current model
+    // Get available durations for current model. Seedance defaults to prompt-inferred Auto.
     const availableDurations = currentVideoModel.durations || [5];
-    const currentDuration = data.videoDuration || availableDurations[0];
+    const usePromptInferredDuration = isSeedanceVideoModel;
+    const currentDuration = data.videoDuration ?? availableDurations[0];
+    const durationOptions: Array<number | 'Auto'> = usePromptInferredDuration
+        ? ['Auto']
+        : ['Auto', ...availableDurations];
+    const durationLabel = usePromptInferredDuration || !data.videoDuration
+        ? 'Auto'
+        : `${currentDuration}s`;
 
     // Get available resolutions for current model (considering duration for models with durationResolutionMap)
     const getAvailableResolutions = () => {
@@ -446,12 +470,14 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
         ? availableResolutions
         : imageAspectRatioOptions;
 
-    const handleDurationChange = (duration: number) => {
+    const handleDurationChange = (duration: number | 'Auto') => {
         const model = currentVideoModel as any;
-        const updates: Partial<typeof data> = { videoDuration: duration };
+        const updates: Partial<typeof data> = {
+            videoDuration: duration === 'Auto' ? undefined : duration
+        };
 
         // If model has duration-specific resolutions, reset resolution if needed
-        if (model.durationResolutionMap) {
+        if (duration !== 'Auto' && model.durationResolutionMap) {
             const allowedResolutions = model.durationResolutionMap[duration] || model.resolutions;
             if (data.resolution && !allowedResolutions.includes(data.resolution.toLowerCase())) {
                 updates.resolution = allowedResolutions[0];
@@ -546,6 +572,14 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
         return 0;
     });
 
+    const seedanceReferenceInputs = connectedImageNodes
+        .filter(node => node.type !== NodeType.VIDEO)
+        .map((node, index) => ({
+            nodeId: node.id,
+            url: node.url,
+            index
+        }));
+
     // Inverse scaling for the prompt bar to keep it readable when zooming out
     // When zooming in (zoom > 0.8), we let it zoom 1:1 with the canvas (localScale = 1)
     // When zooming out (zoom < 0.8), we keep it at least at 0.8 effective scale
@@ -605,7 +639,9 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                     <textarea
                         className={`w-full bg-transparent text-sm outline-none resize-none font-light ${isDark ? 'text-white placeholder-neutral-600' : 'text-neutral-900 placeholder-neutral-400'}`}
                         placeholder={
-                            data.type === NodeType.VIDEO && isFrameToFrame && currentVideoModel.provider === 'kling'
+                            data.type === NodeType.VIDEO && isSeedanceVideoModel && hasConnectedImages
+                                ? "Describe how Seedance should animate these reference images..."
+                                : data.type === NodeType.VIDEO && isFrameToFrame && currentVideoModel.provider === 'kling'
                                 ? "Prompt optional for Kling frame-to-frame..."
                                 : data.type === NodeType.VIDEO && inputUrl
                                     ? "Describe how to animate this frame..."
@@ -723,6 +759,8 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                         <GoogleIcon size={12} className="text-white" />
                                     ) : currentVideoModel.provider === 'kling' ? (
                                         <KlingIcon size={14} />
+                                    ) : currentVideoModel.provider === 'hailuo' ? (
+                                        <HailuoIcon size={14} />
                                     ) : (
                                         <Film size={12} className="text-cyan-400" />
                                     )}
@@ -737,12 +775,14 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                         <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider bg-[#1a1a1a] border-b border-neutral-700 flex items-center gap-1.5">
                                             <span className={`w-1.5 h-1.5 rounded-full ${videoGenerationMode === 'text-to-video' ? 'bg-blue-400' :
                                                 videoGenerationMode === 'image-to-video' ? 'bg-green-400' :
-                                                    videoGenerationMode === 'motion-control' ? 'bg-orange-400' : 'bg-purple-400'
+                                                    videoGenerationMode === 'reference-to-video' ? 'bg-cyan-400' :
+                                                        videoGenerationMode === 'motion-control' ? 'bg-orange-400' : 'bg-purple-400'
                                                 }`} />
                                             {videoGenerationMode === 'text-to-video' ? 'Text → Video' :
                                                 videoGenerationMode === 'image-to-video' ? 'Image → Video' :
-                                                    videoGenerationMode === 'motion-control' ? 'Motion Control' :
-                                                        'Frame-to-Frame'}
+                                                    videoGenerationMode === 'reference-to-video' ? 'Reference to Video' :
+                                                        videoGenerationMode === 'motion-control' ? 'Motion Control' :
+                                                            'Frame-to-Frame'}
                                         </div>
                                         {/* Google Models */}
                                         {availableVideoModels.filter(m => m.provider === 'google').length > 0 && (
@@ -763,6 +803,29 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                                             ) : (
                                                                 <Film size={12} className="text-cyan-400" />
                                                             )}
+                                                            {model.name}
+                                                        </span>
+                                                        {currentVideoModel.id === model.id && <Check size={12} />}
+                                                    </button>
+                                                ))}
+                                            </>
+                                        )}
+
+                                        {/* Seedance Models */}
+                                        {availableVideoModels.filter(m => m.provider === 'seedance').length > 0 && (
+                                            <>
+                                                <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f] border-t border-neutral-700">
+                                                    Seedance
+                                                </div>
+                                                {availableVideoModels.filter(m => m.provider === 'seedance').map(model => (
+                                                    <button
+                                                        key={model.id}
+                                                        onClick={() => handleVideoModelChange(model.id)}
+                                                        className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left hover:bg-[#333] transition-colors ${currentVideoModel.id === model.id ? 'text-blue-400' : 'text-neutral-300'
+                                                            }`}
+                                                    >
+                                                        <span className="flex items-center gap-2">
+                                                            <Film size={12} className="text-cyan-400" />
                                                             {model.name}
                                                         </span>
                                                         {currentVideoModel.id === model.id && <Check size={12} />}
@@ -1044,32 +1107,38 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                         )}
 
                         {/* Duration Dropdown - Only for video nodes (hidden in motion-control mode) */}
-                        {isVideoNode && videoGenerationMode !== 'motion-control' && availableDurations.length > 0 && (
+                        {isVideoNode && videoGenerationMode !== 'motion-control' && durationOptions.length > 0 && (
                             <div className="relative" ref={durationDropdownRef}>
                                 <button
                                     onClick={() => setShowDurationDropdown(!showDurationDropdown)}
                                     className="flex items-center gap-1.5 text-xs font-medium bg-[#252525] hover:bg-[#333] border border-neutral-700 text-white px-2.5 py-1.5 rounded-lg transition-colors"
                                 >
                                     <Clock size={12} className="text-cyan-400" />
-                                    {currentDuration}s
+                                    {durationLabel}
                                 </button>
 
                                 {/* Duration Dropdown Menu */}
                                 {showDurationDropdown && (
-                                    <div className="absolute bottom-full mb-2 right-0 w-24 bg-[#252525] border border-neutral-700 rounded-lg shadow-xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-100">
+                                    <div className="absolute bottom-full mb-2 right-0 w-32 bg-[#252525] border border-neutral-700 rounded-lg shadow-xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-100">
                                         <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f]">
                                             Duration
                                         </div>
-                                        {availableDurations.map((dur: number) => (
+                                        {durationOptions.map((dur) => {
+                                            const isAuto = dur === 'Auto';
+                                            const isSelected = isAuto
+                                                ? usePromptInferredDuration || !data.videoDuration
+                                                : currentDuration === dur && !usePromptInferredDuration;
+                                            return (
                                             <button
-                                                key={dur}
+                                                key={String(dur)}
                                                 onClick={() => handleDurationChange(dur)}
-                                                className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left hover:bg-[#333] transition-colors ${currentDuration === dur ? 'text-blue-400' : 'text-neutral-300'}`}
+                                                className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left hover:bg-[#333] transition-colors ${isSelected ? 'text-blue-400' : 'text-neutral-300'}`}
                                             >
-                                                <span>{dur}s</span>
-                                                {currentDuration === dur && <Check size={12} />}
+                                                <span>{isAuto ? 'Auto' : `${dur}s`}</span>
+                                                {isSelected && <Check size={12} />}
                                             </button>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 )}
                             </div>
@@ -1313,8 +1382,40 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                     </div>
                                 )}
 
+                                {/* Seedance Reference Images - Seedance uses image references, not start/end frames */}
+                                {isSeedanceVideoModel && seedanceReferenceInputs.length > 0 && (
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] text-neutral-500 uppercase tracking-wider">
+                                            Seedance Reference Images
+                                        </label>
+
+                                        <div className="space-y-2">
+                                            {seedanceReferenceInputs.map((input) => (
+                                                <div
+                                                    key={input.nodeId}
+                                                    className="flex items-center gap-2 p-2 bg-neutral-800 rounded-lg border border-cyan-500/20"
+                                                >
+                                                    <img
+                                                        src={input.url}
+                                                        alt={`Seedance reference ${input.index + 1}`}
+                                                        className="w-12 h-12 object-cover rounded"
+                                                    />
+                                                    <div className="flex-1">
+                                                        <span className="text-xs font-medium px-2 py-0.5 rounded bg-cyan-600/25 text-cyan-300">
+                                                            REF {input.index + 1}
+                                                        </span>
+                                                        <p className="mt-1 text-[10px] text-neutral-500">
+                                                            Sent as images/reference_images, not start/end frames.
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
                                 {/* Frame Inputs - Show when 2+ nodes are connected */}
-                                {connectedImageNodes.length >= 2 && (
+                                {!isSeedanceVideoModel && connectedImageNodes.length >= 2 && (
                                     <div className="space-y-2">
                                         <label className="text-[10px] text-neutral-500 uppercase tracking-wider">
                                             {videoGenerationMode === 'motion-control' ? 'Input References' : 'Connected Frames'}

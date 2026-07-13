@@ -5,9 +5,11 @@
  * Manages generation state, API calls, and error handling.
  */
 
-import { NodeData, NodeType, NodeStatus } from '../types';
+import { MediaTake, NodeData, NodeType, NodeStatus } from '../types';
 import { generateImage, generateVideo } from '../services/generationService';
 import { generateLocalImage } from '../services/localModelService';
+import { buildGenerationSuccessUpdate } from '../utils/takeHelpers';
+import { isSeedanceVideoModel } from '../utils/videoModelRouting';
 import { extractVideoLastFrame } from '../utils/videoHelpers';
 
 interface UseGenerationProps {
@@ -148,12 +150,12 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                 }
 
                 // Generate image with all parent images and character references
-                const rawResultUrl = await generateImage({
+                const generationResult = await generateImage({
                     prompt: combinedPrompt,
                     aspectRatio: node.aspectRatio,
                     resolution: node.resolution,
                     imageBase64: imageBase64s.length > 0 ? imageBase64s : undefined,
-                    imageModel: node.imageModel,
+                    imageModel: node.imageModel || 'gpt-image-2',
                     nodeId: id,
                     // Kling V1.5 reference settings
                     klingReferenceMode: node.klingReferenceMode,
@@ -161,21 +163,15 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                     klingSubjectIntensity: node.klingSubjectIntensity
                 });
 
-                // Add cache-busting parameter to force browser to fetch new image
-                // (Backend uses nodeId as filename, so URL is the same for regenerated images)
-                const resultUrl = `${rawResultUrl}?t=${Date.now()}`;
+                const resultUrl = generationResult.resultUrl;
 
                 // Detect actual image dimensions (for display purposes only)
                 const { resultAspectRatio } = await getImageAspectRatio(resultUrl);
 
-                // Keep user's selected aspectRatio - don't overwrite it with detected ratio
-                updateNode(id, {
-                    status: NodeStatus.SUCCESS,
-                    resultUrl,
+                updateNode(id, buildGenerationSuccessUpdate(node, generationResult, {
                     resultAspectRatio,
                     // Note: aspectRatio is intentionally NOT updated to preserve user's selection
-                    errorMessage: undefined
-                });
+                }));
 
 
             } else if (node.type === NodeType.LOCAL_IMAGE_MODEL) {
@@ -210,25 +206,32 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                 });
 
                 if (result.success && result.resultUrl) {
-                    // Add cache-busting parameter
-                    const resultUrl = `${result.resultUrl}?t=${Date.now()}`;
+                    const resultUrl = result.resultUrl;
 
                     // Detect actual image dimensions
                     const { resultAspectRatio } = await getImageAspectRatio(resultUrl);
-
-                    updateNode(id, {
-                        status: NodeStatus.SUCCESS,
-                        resultUrl,
-                        resultAspectRatio,
-                        errorMessage: undefined
-                    });
+                    const take: MediaTake = {
+                        id: `take_${crypto.randomUUID()}`,
+                        nodeId: id,
+                        type: 'image',
+                        url: resultUrl,
+                        prompt: combinedPrompt,
+                        model: node.localModelId || node.localModelPath || 'local-image-model',
+                        createdAt: new Date().toISOString(),
+                        isHero: true,
+                        metadata: {
+                            modelType: result.modelType,
+                            device: result.device
+                        }
+                    };
+                    updateNode(id, buildGenerationSuccessUpdate(node, { resultUrl, take }, { resultAspectRatio }));
                 } else {
                     throw new Error(result.error || 'Local generation failed');
                 }
 
             } else if (node.type === NodeType.VIDEO) {
                 // Get first parent image for video generation (start frame)
-                let imageBase64: string | undefined;
+                let imageBase64: string | string[] | undefined;
                 let lastFrameBase64: string | undefined;
 
                 // Get non-TEXT parent nodes (image sources only)
@@ -240,6 +243,13 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                 // Check for frame-to-frame mode (explicit or auto-detected from 2+ image parents)
                 const hasMultipleInputs = imageParentIds.length >= 2;
                 const hasExplicitFrameInputs = node.frameInputs && node.frameInputs.length >= 2;
+                const isSeedanceModel = isSeedanceVideoModel(node.videoModel);
+                const requestedDuration = isSeedanceModel ? undefined : node.videoDuration;
+                const seedanceReferenceImages = node.parentIds
+                    ?.map(pid => nodes.find(n => n.id === pid))
+                    .filter(n => n?.type === NodeType.IMAGE && n.resultUrl)
+                    .map(n => n!.resultUrl!)
+                    || [];
 
                 // Motion Reference logic (Kling 2.6)
                 let motionReferenceUrl: string | undefined;
@@ -256,10 +266,12 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                     }
                 }
 
-                // Only evaluate as frame-to-frame if NOT in motion control mode
-                const isFrameToFrame = !isMotionControl && (node.videoMode === 'frame-to-frame' || hasMultipleInputs || hasExplicitFrameInputs);
+                // Seedance uses reference images, not start/end interpolation frames.
+                const isFrameToFrame = !isSeedanceModel && !isMotionControl && (node.videoMode === 'frame-to-frame' || hasMultipleInputs || hasExplicitFrameInputs);
 
-                if (isFrameToFrame && imageParentIds.length >= 2) {
+                if (isSeedanceModel && seedanceReferenceImages.length > 0) {
+                    imageBase64 = seedanceReferenceImages;
+                } else if (isFrameToFrame && imageParentIds.length >= 2) {
                     // Get start and end frames from frameInputs (if user reordered) or default order
                     const parent1 = nodes.find(n => n.id === imageParentIds[0]);
                     const parent2 = nodes.find(n => n.id === imageParentIds[1]);
@@ -314,22 +326,20 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                 }
 
                 // Generate video
-                const rawResultUrl = await generateVideo({
+                const generationResult = await generateVideo({
                     prompt: combinedPrompt,
                     imageBase64,
                     lastFrameBase64,
                     aspectRatio: node.aspectRatio,
                     resolution: node.resolution,
-                    duration: node.videoDuration,
+                    duration: requestedDuration,
                     videoModel: node.videoModel,
                     motionReferenceUrl,
                     generateAudio: node.generateAudio, // For Kling 2.6 and Veo 3.1 native audio
                     nodeId: id
                 });
 
-                // Add cache-busting parameter to force browser to fetch new video
-                // (Backend uses nodeId as filename, so URL is the same for regenerated videos)
-                const resultUrl = `${rawResultUrl}?t=${Date.now()}`;
+                const resultUrl = generationResult.resultUrl;
 
                 // Extract last frame for chaining
                 const lastFrame = await extractVideoLastFrame(resultUrl);
@@ -352,14 +362,11 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                     // Ignore errors, use undefined aspect ratio
                 }
 
-                updateNode(id, {
-                    status: NodeStatus.SUCCESS,
-                    resultUrl,
+                updateNode(id, buildGenerationSuccessUpdate(node, generationResult, {
                     resultAspectRatio,
                     aspectRatio,
                     lastFrame,
-                    errorMessage: undefined // Clear any previous error
-                });
+                }));
 
 
             }
@@ -374,7 +381,7 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                 errorMessage = '⚠️ Input image incompatible. Veo requires: JPEG format, 16:9 or 9:16 aspect ratio. Try a different image or generate without input.';
             }
 
-            updateNode(id, { status: NodeStatus.ERROR, errorMessage });
+            updateNode(id, { status: NodeStatus.ERROR, errorMessage, generationStartTime: undefined });
             console.error('Generation failed:', error);
         }
     };

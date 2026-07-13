@@ -12,7 +12,7 @@ import { TopBar } from './components/TopBar';
 import { CanvasNode } from './components/canvas/CanvasNode';
 import { ConnectionsLayer } from './components/canvas/ConnectionsLayer';
 import { ContextMenu } from './components/ContextMenu';
-import { ContextMenuState, NodeData, NodeStatus, NodeType } from './types';
+import { ContextMenuState, NodeData, NodeGroup, NodeStatus, NodeType } from './types';
 import { generateImage, generateVideo } from './services/generationService';
 import { useCanvasNavigation } from './hooks/useCanvasNavigation';
 import { useNodeManagement } from './hooks/useNodeManagement';
@@ -35,6 +35,7 @@ import { useContextMenuHandlers } from './hooks/useContextMenuHandlers';
 import { useAutoSave } from './hooks/useAutoSave';
 import { useGenerationRecovery } from './hooks/useGenerationRecovery';
 import { useVideoFrameExtraction } from './hooks/useVideoFrameExtraction';
+import { appendHeroTake } from './utils/takeHelpers';
 import { extractVideoLastFrame } from './utils/videoHelpers';
 import { SelectionBoundingBox } from './components/canvas/SelectionBoundingBox';
 import { WorkflowPanel } from './components/WorkflowPanel';
@@ -52,6 +53,8 @@ import { useTikTokImport } from './hooks/useTikTokImport';
 import { useStoryboardGenerator } from './hooks/useStoryboardGenerator';
 import { StoryboardGeneratorModal } from './components/modals/StoryboardGeneratorModal';
 import { StoryboardVideoModal } from './components/modals/StoryboardVideoModal';
+import { getStoryboardVideoReadiness } from './utils/storyboardFlow';
+import { DEFAULT_SEEDANCE_VIDEO_MODEL_ID, isSeedanceVideoModel } from './utils/videoModelRouting';
 
 // ============================================================================
 // MAIN COMPONENT
@@ -297,8 +300,8 @@ export default function App() {
     setNodes([]);
     setGroups([]); // Reset groups for new canvas
     setSelectedNodeIds([]);
-    setCanvasTitle('Untitled Canvas');
-    setEditingTitleValue('Untitled Canvas');
+    setCanvasTitle('未命名画布');
+    setEditingTitleValue('未命名画布');
     resetWorkflowId(); // Important: ensures new workflow gets a new ID
     setIsDirty(false);
   };
@@ -411,9 +414,16 @@ export default function App() {
   });
 
   // Storyboard Generator Tool
+  const [pendingStoryboardVideoGroupId, setPendingStoryboardVideoGroupId] = useState<string | null>(null);
+
   const handleCreateStoryboardNodes = React.useCallback((
     newNodeData: Partial<NodeData>[],
-    groupInfo?: { groupId: string; groupLabel: string }
+    groupInfo?: {
+      groupId: string;
+      groupLabel: string;
+      storyContext?: NodeGroup['storyContext'];
+      openVideoAfterImages?: boolean;
+    }
   ) => {
     console.log('[Storyboard] handleCreateStoryboardNodes called with', newNodeData.length, 'nodes, groupInfo:', !!groupInfo);
     const newNodes: NodeData[] = newNodeData.map(data => ({
@@ -423,8 +433,8 @@ export default function App() {
       y: data.y || 0,
       prompt: data.prompt || '',
       status: data.status || NodeStatus.IDLE,
-      model: data.model || 'gpt-image-1.5',
-      imageModel: data.imageModel,
+      model: data.model || data.imageModel || 'gpt-image-2',
+      imageModel: data.imageModel || 'gpt-image-2',
       aspectRatio: data.aspectRatio || '16:9',
       resolution: data.resolution || '1K',
       title: data.title,
@@ -442,9 +452,13 @@ export default function App() {
         nodeIds: newNodes.map(n => n.id),
         label: groupInfo.groupLabel,
         // Save story context if available to help AI understand the full narrative later
-        storyContext: (groupInfo as any).storyContext
+        storyContext: groupInfo.storyContext
       };
       setGroups(prev => [...prev, newGroup]);
+    }
+
+    if (groupInfo?.openVideoAfterImages) {
+      setPendingStoryboardVideoGroupId(groupInfo.groupId);
     }
 
     if (newNodes.length > 0) {
@@ -485,7 +499,7 @@ export default function App() {
   const [storyboardVideoModal, setStoryboardVideoModal] = useState<{
     isOpen: boolean;
     nodes: NodeData[];
-    storyContext?: { story: string; scripts: any[] };
+    storyContext?: NodeGroup['storyContext'];
   }>({ isOpen: false, nodes: [] });
 
   const handleCreateStoryboardVideo = React.useCallback((targetNodeIds?: string[]) => {
@@ -518,6 +532,19 @@ export default function App() {
       storyContext
     });
   }, [nodes, selectedNodeIds, groups]);
+
+  React.useEffect(() => {
+    if (!pendingStoryboardVideoGroupId) return;
+
+    const readiness = getStoryboardVideoReadiness(nodes, pendingStoryboardVideoGroupId);
+    if (!readiness.isComplete) return;
+
+    setPendingStoryboardVideoGroupId(null);
+    if (readiness.readyNodeIds.length === 0) return;
+
+    setSelectedNodeIds(readiness.readyNodeIds);
+    handleCreateStoryboardVideo(readiness.readyNodeIds);
+  }, [pendingStoryboardVideoGroupId, nodes, handleCreateStoryboardVideo, setSelectedNodeIds]);
 
   const handleGenerateStoryVideos = React.useCallback((
     prompts: Record<string, string>,
@@ -570,7 +597,7 @@ export default function App() {
         resolution: settings.resolution,
         parentIds: [sourceNode.id], // Connect to source image
         // groupId: undefined, // Explicitly NOT in the group
-        videoMode: 'frame-to-frame', // Important for image-to-video
+        videoMode: isSeedanceVideoModel(settings.model) ? 'standard' : 'frame-to-frame',
         inputUrl: sourceNode.resultUrl, // Pass image as input
       };
 
@@ -706,7 +733,7 @@ export default function App() {
     const createNode = (resultAspectRatio?: string, aspectRatio?: string) => {
       const isVideo = type === 'videos';
       // Use the original model from asset metadata, or fall back to defaults
-      const defaultModel = isVideo ? 'veo-3.1' : 'imagen-3.0-generate-002';
+      const defaultModel = isVideo ? DEFAULT_SEEDANCE_VIDEO_MODEL_ID : 'gpt-image-2';
       const nodeModel = model || defaultModel;
 
       const newNode: NodeData = {
@@ -763,7 +790,7 @@ export default function App() {
   };
 
   const handleLibrarySelect = (url: string, type: 'image' | 'video') => {
-    handleSelectAsset(type === 'image' ? 'images' : 'videos', url, 'Asset Library Item');
+    handleSelectAsset(type === 'image' ? 'images' : 'videos', url, '素材库条目');
     closeAssetLibrary();
   };
 
@@ -1005,8 +1032,10 @@ export default function App() {
         onToggleCharacter={storyboardGenerator.toggleCharacter}
         onSetSceneCount={storyboardGenerator.setSceneCount}
         onSetStory={storyboardGenerator.setStory}
+        onSetSelectedImageModel={storyboardGenerator.setSelectedImageModel}
         onUpdateScript={storyboardGenerator.updateScript}
         onGenerateScripts={storyboardGenerator.generateScripts}
+        onGenerateStoryPackage={storyboardGenerator.generateStoryPackage}
         onBrainstormStory={storyboardGenerator.brainstormStory}
         onOptimizeStory={storyboardGenerator.optimizeStory}
         onGenerateComposite={storyboardGenerator.generateComposite}
@@ -1299,7 +1328,7 @@ export default function App() {
         nodeId={editorModal.nodeId || ''}
         imageUrl={editorModal.imageUrl}
         initialPrompt={nodes.find(n => n.id === editorModal.nodeId)?.prompt}
-        initialModel={nodes.find(n => n.id === editorModal.nodeId)?.imageModel || 'gemini-pro'}
+        initialModel={nodes.find(n => n.id === editorModal.nodeId)?.imageModel || 'gpt-image-2'}
         initialAspectRatio={nodes.find(n => n.id === editorModal.nodeId)?.aspectRatio || 'Auto'}
         initialResolution={nodes.find(n => n.id === editorModal.nodeId)?.resolution || '1K'}
         initialElements={nodes.find(n => n.id === editorModal.nodeId)?.editorElements as any}
@@ -1314,7 +1343,7 @@ export default function App() {
           if (!sourceNode) return;
 
           // Get settings from source node (which were updated by the modal)
-          const imageModel = sourceNode.imageModel || 'gemini-pro';
+          const imageModel = sourceNode.imageModel || 'gpt-image-2';
           const aspectRatio = sourceNode.aspectRatio || 'Auto';
           const resolution = sourceNode.resolution || '1K';
 
@@ -1356,14 +1385,23 @@ export default function App() {
 
           newNodes.forEach(async (node) => {
             try {
-              const resultUrl = await generateImage({
+              const generationResult = await generateImage({
                 prompt: node.prompt || '',
                 imageBase64: imageBase64,
                 imageModel: imageModel,
                 aspectRatio: aspectRatio,
-                resolution: resolution
+                resolution: resolution,
+                nodeId: node.id
               });
-              updateNode(node.id, { status: NodeStatus.SUCCESS, resultUrl });
+              const nodeWithTake = generationResult.take
+                ? appendHeroTake(node, generationResult.take)
+                : { ...node, resultUrl: generationResult.resultUrl };
+              updateNode(node.id, {
+                status: NodeStatus.SUCCESS,
+                resultUrl: nodeWithTake.resultUrl,
+                takes: nodeWithTake.takes,
+                heroTakeId: nodeWithTake.heroTakeId
+              });
             } catch (error: any) {
               updateNode(node.id, { status: NodeStatus.ERROR, errorMessage: error.message });
             }

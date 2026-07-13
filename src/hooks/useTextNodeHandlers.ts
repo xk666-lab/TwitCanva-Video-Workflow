@@ -6,6 +6,7 @@
 
 import React from 'react';
 import { NodeData, NodeType, NodeStatus } from '../types';
+import { DEFAULT_SEEDANCE_VIDEO_MODEL_ID } from '../utils/videoModelRouting';
 
 interface UseTextNodeHandlersOptions {
     nodes: NodeData[];
@@ -46,7 +47,8 @@ export const useTextNodeHandlers = ({
             y: textNode.y,
             prompt: textNode.prompt || '',
             status: NodeStatus.IDLE,
-            model: 'Banana Pro',
+            model: DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
+            videoModel: DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
             aspectRatio: 'Auto',
             resolution: 'Auto',
             parentIds: [nodeId]
@@ -82,7 +84,8 @@ export const useTextNodeHandlers = ({
             y: textNode.y,
             prompt: textNode.prompt || '',
             status: NodeStatus.IDLE,
-            model: 'Banana Pro',
+            model: 'gpt-image-2',
+            imageModel: 'gpt-image-2',
             aspectRatio: 'Auto',
             resolution: 'Auto',
             parentIds: [nodeId]

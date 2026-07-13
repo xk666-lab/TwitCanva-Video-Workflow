@@ -10,12 +10,13 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Loader2, Trash2, Maximize2, Image as ImageIcon, Video } from 'lucide-react';
+import { apiDelete, apiGet } from '../services/apiClient';
 
 // ============================================================================
 // CONSTANTS
 // ============================================================================
 
-const PAGE_SIZE = 18; // 6 columns × 3 rows
+const PAGE_SIZE = 18; // 6 columns 閼?3 rows
 
 // ============================================================================
 // TYPES
@@ -37,6 +38,12 @@ interface HistoryPanelProps {
     onSelectAsset: (type: 'images' | 'videos', url: string, prompt: string, model?: string) => void;
     panelY?: number;
     canvasTheme?: 'dark' | 'light';
+}
+
+interface AssetPageResponse {
+    assets: AssetMetadata[];
+    total: number;
+    hasMore: boolean;
 }
 
 // ============================================================================
@@ -87,21 +94,13 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
      */
     const fetchCounts = async () => {
         try {
-            // Fetch counts in parallel
-            const [imgRes, vidRes] = await Promise.all([
-                fetch('http://localhost:3001/api/assets/images?limit=1'),
-                fetch('http://localhost:3001/api/assets/videos?limit=1')
+            const [imgData, vidData] = await Promise.all([
+                apiGet<AssetPageResponse>('/api/assets/images?limit=1'),
+                apiGet<AssetPageResponse>('/api/assets/videos?limit=1')
             ]);
 
-            if (imgRes.ok) {
-                const imgData = await imgRes.json();
-                setImageTotalCount(imgData.total);
-            }
-
-            if (vidRes.ok) {
-                const vidData = await vidRes.json();
-                setVideoTotalCount(vidData.total);
-            }
+            setImageTotalCount(imgData.total);
+            setVideoTotalCount(vidData.total);
         } catch (error) {
             console.error('Failed to fetch asset counts:', error);
         }
@@ -138,27 +137,24 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
         }
 
         try {
-            const response = await fetch(
-                `http://localhost:3001/api/assets/${activeTab}?limit=${PAGE_SIZE}&offset=${pageOffset}`
+            const data = await apiGet<AssetPageResponse>(
+                `/api/assets/${activeTab}?limit=${PAGE_SIZE}&offset=${pageOffset}`
             );
-            if (response.ok) {
-                const data = await response.json();
 
-                if (isInitial) {
-                    setAssets(data.assets);
-                } else {
-                    setAssets(prev => [...prev, ...data.assets]);
-                }
+            if (isInitial) {
+                setAssets(data.assets);
+            } else {
+                setAssets(prev => [...prev, ...data.assets]);
+            }
 
-                setHasMore(data.hasMore);
-                setOffset(pageOffset + data.assets.length);
+            setHasMore(data.hasMore);
+            setOffset(pageOffset + data.assets.length);
 
-                // Update total counts
-                if (activeTab === 'images') {
-                    setImageTotalCount(data.total);
-                } else {
-                    setVideoTotalCount(data.total);
-                }
+            // Update total counts
+            if (activeTab === 'images') {
+                setImageTotalCount(data.total);
+            } else {
+                setVideoTotalCount(data.total);
             }
         } catch (error) {
             console.error('Failed to fetch assets:', error);
@@ -179,17 +175,13 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
 
     const handleDelete = async (id: string) => {
         try {
-            const response = await fetch(`http://localhost:3001/api/assets/${activeTab}/${id}`, {
-                method: 'DELETE'
-            });
-            if (response.ok) {
-                setAssets(prev => prev.filter(a => a.id !== id));
-                // Update counts
-                if (activeTab === 'images') {
-                    setImageTotalCount(prev => prev - 1);
-                } else {
-                    setVideoTotalCount(prev => prev - 1);
-                }
+            await apiDelete(`/api/assets/${activeTab}/${id}`);
+            setAssets(prev => prev.filter(a => a.id !== id));
+            // Update counts
+            if (activeTab === 'images') {
+                setImageTotalCount(prev => prev - 1);
+            } else {
+                setVideoTotalCount(prev => prev - 1);
             }
         } catch (error) {
             console.error('Failed to delete asset:', error);
@@ -199,7 +191,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
 
     const handleSelectAsset = (asset: AssetMetadata) => {
         // Construct full URL for the asset
-        const fullUrl = `http://localhost:3001${asset.url}`;
+        const fullUrl = `${asset.url}`;
         onSelectAsset(activeTab, fullUrl, asset.prompt || '', asset.model);
     };
 
@@ -276,8 +268,12 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
                             <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-3 ${isDark ? 'bg-neutral-800' : 'bg-neutral-100'}`}>
                                 {activeTab === 'images' ? <ImageIcon size={24} /> : <Video size={24} />}
                             </div>
-                            <p>No {activeTab} found</p>
-                            <p className="text-xs mt-1">Generated {activeTab} will appear here</p>
+                            <p>{activeTab === 'images' ? 'No image history' : 'No video history'}</p>
+                            <p className="text-xs mt-1">
+                                {activeTab === 'images'
+                                    ? 'Generated images will appear here'
+                                    : 'Generated videos will appear here'}
+                            </p>
                         </div>
                     ) : (
                         <div className="space-y-6">
@@ -293,14 +289,14 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
                                             >
                                                 {activeTab === 'images' ? (
                                                     <img
-                                                        src={`http://localhost:3001${asset.url}`}
-                                                        alt={asset.prompt || 'Generated image'}
+                                                        src={`${asset.url}`}
+                                                        alt={asset.prompt || '闁汇垻鍠愰崹姘跺炊閸撗冾暬'}
                                                         className="w-full h-full object-cover"
                                                         loading="lazy"
                                                     />
                                                 ) : (
                                                     <video
-                                                        src={`http://localhost:3001${asset.url}`}
+                                                        src={`${asset.url}`}
                                                         className="w-full h-full object-cover"
                                                         muted
                                                         preload="metadata"
@@ -347,7 +343,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
             {deleteConfirm && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
                     <div className={`border rounded-2xl p-6 w-[340px] shadow-2xl ${isDark ? 'bg-[#1a1a1a] border-neutral-700' : 'bg-white border-neutral-200'}`}>
-                        <h3 className={`text-lg font-semibold mb-2 ${isDark ? 'text-white' : 'text-neutral-900'}`}>Delete Asset</h3>
+                        <h3 className={`text-lg font-semibold mb-2 ${isDark ? 'text-white' : 'text-neutral-900'}`}>Delete asset</h3>
                         <p className={`text-sm mb-6 ${isDark ? 'text-neutral-400' : 'text-neutral-600'}`}>
                             Are you sure you want to delete this {activeTab === 'images' ? 'image' : 'video'}? This action cannot be undone.
                         </p>

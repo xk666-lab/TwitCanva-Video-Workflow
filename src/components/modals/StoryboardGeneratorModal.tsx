@@ -1,25 +1,15 @@
-/**
+﻿/**
  * StoryboardGeneratorModal.tsx
  * 
  * Modal overlay for creating AI-powered storyboard scenes.
- * Multi-step workflow: Character Selection → Story Input → Script Review → Generate
+ * Multi-step workflow: Character Selection 鈫?Story Input 鈫?Script Review 鈫?Generate
  */
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { X, ChevronRight, ChevronLeft, Loader2, Film, Users, PenTool, Sparkles, Check, Edit3, Wand2, Eye, ChevronDown } from 'lucide-react';
 import { CharacterAsset, SceneScript, StoryboardState } from '../../hooks/useStoryboardGenerator';
 import { StoryInput } from '../StoryInput';
-
-// ============================================================================
-// IMAGE MODELS (Copied from NodeControls.tsx for model selection)
-// ============================================================================
-
-const IMAGE_MODELS = [
-    { id: 'gpt-image-1.5', name: 'GPT Image 1.5', provider: 'openai' },
-    { id: 'gemini-pro', name: 'Nano Banana Pro', provider: 'google' },
-    { id: 'kling-v1-5', name: 'Kling V1.5', provider: 'kling' },
-    { id: 'kling-v2-1', name: 'Kling V2.1', provider: 'kling' },
-];
+import { getStoryboardImageModelName, STORYBOARD_IMAGE_MODELS } from '../../utils/storyboardModelOptions';
 
 // ============================================================================
 // TYPES
@@ -33,13 +23,15 @@ interface StoryboardGeneratorModalProps {
     onToggleCharacter: (character: CharacterAsset) => void;
     onSetSceneCount: (count: number) => void;
     onSetStory: (story: string) => void;
+    onSetSelectedImageModel: (model: string) => void;
     onUpdateScript: (index: number, updates: Partial<SceneScript>) => void;
     onGenerateScripts: () => Promise<void>;
+    onGenerateStoryPackage: () => Promise<void>;
     onBrainstormStory: () => Promise<void>;
     onOptimizeStory: () => Promise<void>;
     onGenerateComposite: () => Promise<void>;
     onRegenerateComposite: () => Promise<void>;
-    onCreateNodes: () => void;
+    onCreateNodes: (options?: { continueToVideo?: boolean }) => void;
 }
 
 // ============================================================================
@@ -54,8 +46,10 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
     onToggleCharacter,
     onSetSceneCount,
     onSetStory,
+    onSetSelectedImageModel,
     onUpdateScript,
     onGenerateScripts,
+    onGenerateStoryPackage,
     onBrainstormStory,
     onOptimizeStory,
     onGenerateComposite,
@@ -74,15 +68,16 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
     const [mentionIndex, setMentionIndex] = useState(0);
     const [mentionStartPos, setMentionStartPos] = useState(0);
     const textareaRef = useRef<HTMLDivElement>(null);
+    const currentImageModelName = getStoryboardImageModelName(state.selectedImageModel);
 
 
     // Step definitions for progress bar
     const stepDefinitions = [
-        { id: 'characters', label: 'Characters', icon: Users },
-        { id: 'story', label: 'Story', icon: PenTool },
-        { id: 'scripts', label: 'Scripts', icon: Film },
-        { id: 'preview', label: 'Preview', icon: Eye },
-        { id: 'generate', label: 'Generate', icon: Sparkles }
+        { id: 'characters', label: '参考图', icon: Users },
+        { id: 'story', label: '故事', icon: PenTool },
+        { id: 'scripts', label: '分镜脚本', icon: Film },
+        { id: 'preview', label: '预览', icon: Eye },
+        { id: 'generate', label: '生成', icon: Sparkles }
     ];
 
     const currentStepIndex = stepDefinitions.findIndex(s => s.id === state.step);
@@ -252,8 +247,8 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                             <Film size={20} className="text-white" />
                         </div>
                         <div>
-                            <h2 className="text-lg font-semibold text-white">Storyboard Generator</h2>
-                            <p className="text-xs text-neutral-500">Create scenes with AI</p>
+                            <h2 className="text-lg font-semibold text-white">{"\u5206\u955c\u751f\u6210\u5668"}</h2>
+                            <p className="text-xs text-neutral-500">{"\u4f7f\u7528 AI \u521b\u5efa\u5206\u955c\u573a\u666f"}</p>
                         </div>
                     </div>
                     <button
@@ -327,10 +322,9 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                 {/* Characters Step Header - Fixed outside scroll area */}
                 {state.step === 'characters' && (
                     <div className="px-6 pt-6 pb-4 border-b border-neutral-800/30">
-                        <h3 className="text-white font-medium mb-2">Select Reference Images</h3>
+                        <h3 className="text-white font-medium mb-2">{"\u9009\u62e9\u53c2\u8003\u56fe\u7247"}</h3>
                         <p className="text-neutral-400 text-sm mb-4">
-                            Choose up to 3 reference images from your Asset Library to guide the AI.
-                        </p>
+                            {"\u4ece\u7d20\u6750\u5e93\u4e2d\u9009\u62e9\u6700\u591a 3 \u5f20\u53c2\u8003\u56fe\u7247\uff0c\u7528\u6765\u5f15\u5bfc AI \u751f\u6210\u5206\u955c\u3002"}</p>
 
                         {/* Category Dropdown */}
                         {characterAssets.length > 0 && (
@@ -340,9 +334,9 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                                     className="w-full flex items-center justify-between px-4 py-2.5 bg-neutral-900 border border-neutral-700 rounded-xl text-sm text-white hover:border-neutral-600 transition-colors"
                                 >
                                     <span className="flex items-center gap-2">
-                                        <span className="text-neutral-400">Category:</span>
+                                        <span className="text-neutral-400">{"\u5206\u7c7b\uff1a"}</span>
                                         <span className="font-medium">{selectedCategory}</span>
-                                        <span className="text-neutral-500 text-xs">({filteredAssets.length} items)</span>
+                                        <span className="text-neutral-500 text-xs">{`\uff08${filteredAssets.length} \u9879\uff09`}</span>
                                     </span>
                                     <ChevronDown size={16} className={`text-neutral-400 transition-transform duration-200 ${isCategoryDropdownOpen ? 'rotate-180' : ''}`} />
                                 </button>
@@ -398,14 +392,14 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                             ) : characterAssets.length === 0 ? (
                                 <div className="text-center py-12 text-neutral-500">
                                     <Users size={48} className="mx-auto mb-3 opacity-50" />
-                                    <p>No images found in Asset Library</p>
-                                    <p className="text-xs mt-1">Add image assets to your library to use them as character references</p>
+                                    <p>{"\u7d20\u6750\u5e93\u4e2d\u6682\u65e0\u56fe\u7247"}</p>
+                                    <p className="text-xs mt-1">{"\u8bf7\u5148\u5728\u7d20\u6750\u5e93\u4e2d\u6dfb\u52a0\u56fe\u7247\u7d20\u6750\uff0c\u624d\u80fd\u4f5c\u4e3a\u89d2\u8272\u53c2\u8003\u4f7f\u7528"}</p>
                                 </div>
                             ) : filteredAssets.length === 0 ? (
                                 <div className="text-center py-12 text-neutral-500">
                                     <Users size={48} className="mx-auto mb-3 opacity-50" />
-                                    <p>No images in "{selectedCategory}" category</p>
-                                    <p className="text-xs mt-1">Try selecting a different category</p>
+                                    <p>{`\u201c${selectedCategory}\u201d\u5206\u7c7b\u4e0b\u6682\u65e0\u56fe\u7247`}</p>
+                                    <p className="text-xs mt-1">{"\u53ef\u4ee5\u8bd5\u8bd5\u5207\u6362\u5230\u5176\u4ed6\u5206\u7c7b"}</p>
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-3 gap-4">
@@ -459,16 +453,16 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                     {/* Step 2: Story Input */}
                     {state.step === 'story' && (
                         <div>
-                            <h3 className="text-white font-medium mb-2">Write Your Story</h3>
+                            <h3 className="text-white font-medium mb-2">编写故事</h3>
                             <p className="text-neutral-400 text-sm mb-4">
-                                Describe the story you want to visualize. AI will break it into {state.sceneCount} scenes.
+                                描述你想要可视化的故事，AI 会将它拆解成 {state.sceneCount} 个场景。
                             </p>
 
                             {/* Selected Reference Images - clickable to insert @ mention */}
                             {state.selectedCharacters.length > 0 && (
                                 <div className="mb-4 p-3 bg-neutral-900/50 rounded-xl border border-neutral-800">
                                     <p className="text-xs text-neutral-400 mb-2">
-                                        Selected references — click to insert @mention in story:
+                                        已选参考图，点击可在故事中插入 @提及：
                                     </p>
                                     <div className="flex flex-wrap gap-2">
                                         {state.selectedCharacters.map(asset => (
@@ -489,7 +483,7 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                                                     @{asset.name}
                                                 </span>
                                                 <span className="text-[10px] text-neutral-500 px-1.5 py-0.5 bg-neutral-900 rounded">
-                                                    {asset.category || 'Others'}
+                                                    {asset.category || '其他'}
                                                 </span>
                                             </button>
                                         ))}
@@ -500,7 +494,7 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                             {/* Scene Count Slider */}
                             <div className="mb-4">
                                 <label className="block text-sm text-neutral-300 mb-2">
-                                    Number of Scenes: <span className="text-purple-400 font-medium">{state.sceneCount}</span>
+                                    {"\u573a\u666f\u6570\u91cf\uff1a"}<span className="text-purple-400 font-medium">{state.sceneCount}</span>
                                 </label>
                                 <input
                                     type="range"
@@ -525,13 +519,34 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                                 {state.isBrainstorming ? (
                                     <>
                                         <Loader2 size={14} className="animate-spin" />
-                                        <span>Brainstorming...</span>
+                                        <span>{"\u5934\u8111\u98ce\u66b4\u4e2d..."}</span>
                                     </>
                                 ) : (
                                     <>
                                         <Wand2 size={14} className="group-hover:rotate-12 transition-transform" />
-                                        <span className="underline decoration-dashed underline-offset-2">Brainstorm with AI</span>
-                                        <span className="text-neutral-500 text-xs">(let AI write a story for you)</span>
+                                        <span className="underline decoration-dashed underline-offset-2">{"\u8ba9 AI \u5e2e\u6211\u6784\u601d"}</span>
+                                        <span className="text-neutral-500 text-xs">{"\uff08\u8ba9 AI \u5e2e\u4f60\u5148\u5199\u4e00\u4e2a\u6545\u4e8b\uff09"}</span>
+                                    </>
+                                )}
+                            </button>
+
+                            <button
+                                onClick={onGenerateStoryPackage}
+                                disabled={state.isGenerating || !state.story.trim()}
+                                className={`mb-4 w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${state.isGenerating || !state.story.trim()
+                                    ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
+                                    : 'bg-gradient-to-r from-cyan-600 to-violet-600 hover:from-cyan-500 hover:to-violet-500 text-white shadow-lg shadow-cyan-600/20'
+                                    }`}
+                            >
+                                {state.isGenerating ? (
+                                    <>
+                                        <Loader2 size={16} className="animate-spin" />
+                                        {"\u6b63\u5728\u751f\u6210\u5267\u60c5+\u5206\u955c..."}
+                                    </>
+                                ) : (
+                                    <>
+                                        <Sparkles size={16} />
+                                        {"\u4e00\u952e\u751f\u6210\u5267\u60c5+\u5206\u955c\u811a\u672c"}
                                     </>
                                 )}
                             </button>
@@ -548,8 +563,8 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                                         setTimeout(() => setShowMentionPicker(false), 150);
                                     }}
                                     placeholder={state.selectedCharacters.length > 0
-                                        ? `Type @ to mention assets like @${state.selectedCharacters[0]?.name}...`
-                                        : "Once upon a time, in a magical forest..."}
+                                        ? `\u8f93\u5165 @ \u6765\u5f15\u7528\u7d20\u6750\uff0c\u4f8b\u5982 @${state.selectedCharacters[0]?.name}...`
+                                        : "\u6bd4\u5982\uff1a\u9ec4\u660f\u7684\u6d77\u8fb9\uff0c\u5c11\u5e74\u4e0e\u5c11\u5973\u7b2c\u4e00\u6b21\u76f8\u9047\u3002"}
                                     assets={state.selectedCharacters}
                                     className="min-h-[12rem]"
                                 />
@@ -558,7 +573,7 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                                 {showMentionPicker && mentionSuggestions.length > 0 && (
                                     <div className="absolute left-4 top-10 w-64 bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl overflow-hidden z-50">
                                         <div className="text-[10px] text-neutral-500 px-3 py-1 border-b border-neutral-700/50 bg-neutral-900">
-                                            Select reference (↑↓ to navigate, Enter to select)
+                                            {"\u9009\u62e9\u53c2\u8003\u7d20\u6750\uff08\u4e0a\u4e0b\u952e\u5207\u6362\uff0cEnter \u786e\u8ba4\uff09"}
                                         </div>
                                         <div className="max-h-48 overflow-y-auto">
                                             {mentionSuggestions.map((asset, index) => (
@@ -578,7 +593,7 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                                                     />
                                                     <div className="flex-1 min-w-0">
                                                         <div className="text-sm font-medium truncate">@{asset.name}</div>
-                                                        <div className="text-[10px] text-neutral-400">{asset.category || 'Others'}</div>
+                                                        <div className="text-[10px] text-neutral-400">{asset.category || "\u5176\u4ed6"}</div>
                                                     </div>
                                                 </button>
                                             ))}
@@ -588,8 +603,7 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                             </div>
                             <div className="flex justify-between items-start mt-2">
                                 <p className="text-xs text-neutral-500">
-                                    Tip: Be descriptive about scenes, actions, and emotions for better results.
-                                </p>
+                                    {"\u63d0\u793a\uff1a\u628a\u573a\u666f\u3001\u52a8\u4f5c\u548c\u60c5\u7eea\u63cf\u8ff0\u5f97\u66f4\u5177\u4f53\uff0c\u751f\u6210\u6548\u679c\u901a\u5e38\u4f1a\u66f4\u597d\u3002"}</p>
                                 <button
                                     onClick={onOptimizeStory}
                                     disabled={state.isOptimizing || !state.story.trim()}
@@ -601,7 +615,7 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                                     ) : (
                                         <Wand2 size={12} />
                                     )}
-                                    Optimize with AI
+                                    {"AI \u4f18\u5316"}
                                 </button>
                             </div>
                         </div>
@@ -610,10 +624,43 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                     {/* Step 3: Script Review */}
                     {state.step === 'scripts' && (
                         <div>
-                            <h3 className="text-white font-medium mb-2">Review & Edit Scripts</h3>
+                            <h3 className="text-white font-medium mb-2">{"\u68c0\u67e5\u5e76\u7f16\u8f91\u811a\u672c"}</h3>
                             <p className="text-neutral-400 text-sm mb-4">
-                                AI generated {state.scripts.length} scene scripts. Click to edit.
-                            </p>
+                                {`AI \u5df2\u751f\u6210 ${state.scripts.length} \u6bb5\u573a\u666f\u811a\u672c\uff0c\u70b9\u51fb\u5373\u53ef\u7f16\u8f91\u3002`}</p>
+
+                            <div className="mb-4 rounded-xl border border-neutral-700 bg-neutral-900/70 p-4">
+                                <div className="flex items-start justify-between gap-4 mb-3">
+                                    <div>
+                                        <h4 className="text-white text-sm font-medium">选择生图模型</h4>
+                                        <p className="text-neutral-500 text-xs mt-1">
+                                            用于生成分镜预览图，并会同步到创建出的 Image Node。
+                                        </p>
+                                    </div>
+                                    <div className="text-xs text-violet-300 bg-violet-500/10 border border-violet-500/30 rounded-full px-2 py-1">
+                                        当前：{currentImageModelName}
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {STORYBOARD_IMAGE_MODELS.map(model => {
+                                        const isSelected = state.selectedImageModel === model.id;
+                                        return (
+                                            <button
+                                                key={model.id}
+                                                type="button"
+                                                onClick={() => onSetSelectedImageModel(model.id)}
+                                                disabled={state.isGeneratingPreview}
+                                                className={`text-left rounded-lg border px-3 py-2 transition-all ${isSelected
+                                                    ? 'border-violet-500 bg-violet-500/15 text-white'
+                                                    : 'border-neutral-700 bg-neutral-950/60 text-neutral-300 hover:border-neutral-500 hover:bg-neutral-800/60'
+                                                    } ${state.isGeneratingPreview ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                            >
+                                                <div className="text-sm font-medium">{model.name}</div>
+                                                <div className="text-[11px] uppercase tracking-wide text-neutral-500">{model.provider}</div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
 
                             <div className="space-y-3">
                                 {state.isGenerating ? (
@@ -639,7 +686,7 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
 
                                             <div className="flex items-center justify-center text-purple-400/50 text-xs font-medium gap-2 pt-2">
                                                 <Loader2 size={12} className="animate-spin" />
-                                                Creating Scene {i + 1}...
+                                                正在创建第 {i + 1} 个场景...
                                             </div>
                                         </div>
                                     ))
@@ -652,7 +699,7 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                                         >
                                             <div className="flex items-center justify-between mb-2">
                                                 <span className="text-purple-400 text-sm font-medium">
-                                                    Scene {script.sceneNumber}
+                                                    场景 {script.sceneNumber}
                                                 </span>
                                                 <div className="flex items-center gap-2 text-xs text-neutral-500">
                                                     <span className="px-2 py-0.5 bg-neutral-800 rounded">
@@ -697,23 +744,25 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                     {/* STEP 4: PREVIEW COMPOSITE */}
                     {state.step === 'preview' && (
                         <div className="flex flex-col h-full">
-                            <h3 className="text-white font-medium mb-2">Preview Storyboard</h3>
+                            <h3 className="text-white font-medium mb-2">预览分镜</h3>
                             <p className="text-neutral-400 text-sm mb-4">
-                                Review the composite storyboard. This image will be used as a reference to generate individual scenes with consistent characters and environments.
+                                检查合成后的分镜预览图。这张图会作为后续逐场景生成时的参考，帮助角色与环境保持一致。
                             </p>
 
                             <div className="flex-1 bg-neutral-900 rounded-xl border border-neutral-700 overflow-hidden flex items-center justify-center p-4 relative group">
                                 {state.isGeneratingPreview ? (
                                     <div className="text-center">
                                         <Loader2 size={48} className="animate-spin text-purple-500 mx-auto mb-4" />
-                                        <p className="text-white font-medium">Generating Preview...</p>
-                                        <p className="text-neutral-400 text-sm mt-2">Creating a cohesive storyboard with Nano Banana Pro</p>
+                                        <p className="text-white font-medium">{"\u6b63\u5728\u751f\u6210\u9884\u89c8..."}</p>
+                                        <p className="text-neutral-400 text-sm mt-2">
+                                            正在使用 {currentImageModelName} 生成统一风格的分镜预览
+                                        </p>
                                     </div>
                                 ) : state.compositeImageUrl ? (
                                     <div className="relative w-full h-full flex items-center justify-center">
                                         <img
                                             src={state.compositeImageUrl}
-                                            alt="Storyboard Composite"
+                                            alt="\u5206\u955c\u5408\u6210\u9884\u89c8"
                                             className="max-h-full max-w-full object-contain rounded shadow-lg"
                                         />
                                         <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -722,18 +771,18 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                                                 className="bg-black/70 hover:bg-black/90 text-white px-3 py-1.5 rounded-lg text-xs font-medium backdrop-blur-sm flex items-center gap-2 border border-white/10"
                                             >
                                                 <Wand2 size={12} />
-                                                Regenerate
+                                                {"\u91cd\u65b0\u751f\u6210"}
                                             </button>
                                         </div>
                                     </div>
                                 ) : (
                                     <div className="text-center text-neutral-500">
-                                        <p>No preview available</p>
+                                        <p>{"\u6682\u65e0\u9884\u89c8\u56fe"}</p>
                                         <button
                                             onClick={onGenerateComposite}
                                             className="mt-4 text-purple-400 hover:text-purple-300 text-sm underline"
                                         >
-                                            Generate Preview
+                                            {"\u751f\u6210\u9884\u89c8"}
                                         </button>
                                     </div>
                                 )}
@@ -741,29 +790,29 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                         </div>
                     )}
 
-                    {/* STEP 5: GENERATE (Summary now, since model selection is removed) */}
+                    {/* STEP 5: GENERATE */}
                     {state.step === 'generate' && (
                         <div>
-                            <h3 className="text-white font-medium mb-2">Ready to Generate</h3>
+                            <h3 className="text-white font-medium mb-2">选择下一步</h3>
                             <p className="text-neutral-400 text-sm mb-4">
-                                Determine the final output. The individual scenes will be extracted from your preview image.
+                                系统会先生成每个独立分镜画面。你可以停在图片分镜阶段，也可以在图片生成完成后自动进入视频生成器。
                             </p>
 
                             <div className="bg-neutral-900 border border-neutral-700 rounded-xl p-4">
-                                <h4 className="text-white text-sm font-medium mb-2">Summary</h4>
+                                <h4 className="text-white text-sm font-medium mb-2">{"\u6458\u8981"}</h4>
                                 <div className="grid grid-cols-2 gap-2 text-sm">
-                                    <div className="text-neutral-400">Characters:</div>
+                                    <div className="text-neutral-400">{"\u89d2\u8272\uff1a"}</div>
                                     <div className="text-white">
                                         {state.selectedCharacters.length > 0
                                             ? state.selectedCharacters.map(c => c.name).join(', ')
-                                            : 'None selected'}
+                                            : "\u672a\u9009\u62e9"}
                                     </div>
-                                    <div className="text-neutral-400">Scenes:</div>
+                                    <div className="text-neutral-400">{"\u573a\u666f\u6570\uff1a"}</div>
                                     <div className="text-white">{state.scripts.length}</div>
-                                    <div className="text-neutral-400">Model:</div>
-                                    <div className="text-white">Nano Banana Pro</div>
-                                    <div className="text-neutral-400">Preview:</div>
-                                    <div className="text-white">{state.compositeImageUrl ? 'Generated' : 'Not available'}</div>
+                                    <div className="text-neutral-400">{"\u6a21\u578b\uff1a"}</div>
+                                    <div className="text-white">{currentImageModelName}</div>
+                                    <div className="text-neutral-400">{"\u9884\u89c8\uff1a"}</div>
+                                    <div className="text-white">{state.compositeImageUrl ? "\u5df2\u751f\u6210" : "\u4e0d\u53ef\u7528"}</div>
                                 </div>
                             </div>
                         </div>
@@ -787,13 +836,13 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                             }`}
                     >
                         <ChevronLeft size={16} />
-                        Back
+                        上一步
                     </button>
 
                     {/* Selected Characters Count - shown in footer for characters step */}
                     {state.step === 'characters' && (
                         <p className="text-xs text-neutral-500">
-                            Selected: {state.selectedCharacters.length}/3 images (optional)
+                            {`\u5df2\u9009\u62e9\uff1a${state.selectedCharacters.length}/3 \u5f20\u56fe\u7247\uff08\u53ef\u9009\uff09`}
                         </p>
                     )}
 
@@ -803,7 +852,7 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                             onClick={() => onSetStep('story')}
                             className="flex items-center gap-2 bg-violet-600 hover:bg-violet-500 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 shadow-lg shadow-violet-600/25 hover:shadow-violet-500/40"
                         >
-                            Next
+                            下一步
                             <ChevronRight size={16} />
                         </button>
                     )}
@@ -820,12 +869,12 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                             {state.isGenerating ? (
                                 <>
                                     <Loader2 size={16} className="animate-spin" />
-                                    Generating Scripts...
+                                    脚本生成中...
                                 </>
                             ) : (
                                 <>
                                     <Sparkles size={16} />
-                                    Generate Scripts
+                                    生成脚本
                                 </>
                             )}
                         </button>
@@ -849,16 +898,16 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                             {state.isGeneratingPreview ? (
                                 <>
                                     <Loader2 size={16} className="animate-spin" />
-                                    Generating...
+                                    生成中...
                                 </>
                             ) : state.compositeImageUrl ? (
                                 <>
                                     <Sparkles size={16} />
-                                    Regenerate Preview
+                                    重新生成预览
                                 </>
                             ) : (
                                 <>
-                                    Next <ChevronRight size={16} />
+                                    下一步<ChevronRight size={16} />
                                 </>
                             )}
                         </button>
@@ -873,18 +922,26 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
                                 : 'bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-600/25 hover:shadow-violet-500/40'
                                 }`}
                         >
-                            Next <ChevronRight size={16} />
+                            下一步<ChevronRight size={16} />
                         </button>
                     )}
 
                     {state.step === 'generate' && (
-                        <button
-                            onClick={onCreateNodes}
-                            className="flex items-center gap-2 bg-violet-600 hover:bg-violet-500 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 shadow-lg shadow-violet-600/25 hover:shadow-violet-500/40"
-                        >
-                            <Film size={16} />
-                            Create Storyboard
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => onCreateNodes({ continueToVideo: false })}
+                                className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200"
+                            >
+                                仅创建分镜图
+                            </button>
+                            <button
+                                onClick={() => onCreateNodes({ continueToVideo: true })}
+                                className="flex items-center gap-2 bg-violet-600 hover:bg-violet-500 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 shadow-lg shadow-violet-600/25 hover:shadow-violet-500/40"
+                            >
+                                <Film size={16} />
+                                创建并继续生成视频
+                            </button>
+                        </div>
                     )}
                 </div>
             </div>

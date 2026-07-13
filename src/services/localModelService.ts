@@ -122,7 +122,7 @@ export const getGpuInfo = async (): Promise<GpuInfo> => {
         return {
             available: false,
             sufficient: false,
-            warning: 'Unable to detect GPU. Local model inference may not work.'
+            warning: '无法检测到 GPU，本地模型推理可能不可用。'
         };
     }
 };
@@ -229,9 +229,9 @@ export const formatFileSize = (bytes: number): string => {
  */
 export const getModelTypeLabel = (type: LocalModel['type']): string => {
     const labels: Record<LocalModel['type'], string> = {
-        'image': 'Image Generation',
-        'video': 'Video Generation',
-        'lora': 'LoRA Adapter',
+        'image': '图片生成',
+        'video': '视频生成',
+        'lora': 'LoRA 适配器',
         'controlnet': 'ControlNet'
     };
     return labels[type] || type;
@@ -302,7 +302,7 @@ export const generateLocalImage = async (params: GenerateLocalImageParams): Prom
         console.error('Error generating with local model:', error);
         return {
             success: false,
-            error: (error as Error).message || 'Failed to generate image'
+            error: (error as Error).message || '生成图片失败'
         };
     }
 };

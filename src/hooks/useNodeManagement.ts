@@ -7,6 +7,19 @@
 
 import { useState } from 'react';
 import { NodeData, NodeType, NodeStatus, Viewport } from '../types';
+import { DEFAULT_SEEDANCE_VIDEO_MODEL_ID } from '../utils/videoModelRouting';
+
+const defaultModelFields = (type: NodeType): Pick<NodeData, 'model'> & Partial<NodeData> => {
+    if (type === NodeType.IMAGE || type === NodeType.IMAGE_EDITOR) {
+        return { model: 'gpt-image-2', imageModel: 'gpt-image-2' };
+    }
+
+    if (type === NodeType.VIDEO || type === NodeType.VIDEO_EDITOR) {
+        return { model: DEFAULT_SEEDANCE_VIDEO_MODEL_ID, videoModel: DEFAULT_SEEDANCE_VIDEO_MODEL_ID };
+    }
+
+    return { model: 'Banana Pro' };
+};
 
 export const useNodeManagement = () => {
     // ============================================================================
@@ -45,7 +58,7 @@ export const useNodeManagement = () => {
             y: parentId ? canvasY : canvasY - 100,
             prompt: '',
             status: NodeStatus.IDLE,
-            model: 'Banana Pro',
+            ...defaultModelFields(type),
             aspectRatio: 'Auto',
             resolution: 'Auto',
             parentIds: parentId ? [parentId] : []
@@ -129,7 +142,7 @@ export const useNodeManagement = () => {
                         y: sourceNode.y,
                         prompt: '',
                         status: NodeStatus.IDLE,
-                        model: 'Banana Pro',
+                        ...defaultModelFields(type),
                         aspectRatio: 'Auto',
                         resolution: 'Auto',
                         parentIds: contextMenu.sourceNodeId ? [contextMenu.sourceNodeId] : []
@@ -143,7 +156,7 @@ export const useNodeManagement = () => {
                         y: sourceNode.y,
                         prompt: '',
                         status: NodeStatus.IDLE,
-                        model: 'Banana Pro',
+                        ...defaultModelFields(type),
                         aspectRatio: 'Auto',
                         resolution: 'Auto',
                         parentIds: []

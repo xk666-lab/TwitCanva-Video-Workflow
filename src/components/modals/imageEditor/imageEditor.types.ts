@@ -94,7 +94,7 @@ export interface ImageModel {
  * Note: Kling V2/V2.1 only support references via Multi-Image API
  */
 export const IMAGE_MODELS: ImageModel[] = [
-    { id: 'gpt-image-1.5', name: 'GPT Image 1.5', provider: 'openai', supportsImageToImage: true, supportsMultiImage: true, recommended: true, resolutions: ["Auto", "1K", "2K", "4K"], aspectRatios: ["Auto", "1024x1024", "1536x1024", "1024x1536"] },
+    { id: 'gpt-image-2', name: 'GPT Image 2', provider: 'openai', supportsImageToImage: true, supportsMultiImage: true, recommended: true, resolutions: ["Auto", "1K", "2K", "4K"], aspectRatios: ["Auto", "1024x1024", "1536x1024", "1024x1536"] },
     { id: 'gemini-pro', name: 'Nano Banana Pro', provider: 'google', supportsImageToImage: true, supportsMultiImage: true, resolutions: ["1K", "2K", "4K"], aspectRatios: ["Auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9"] },
     // Kling AI models - Consolidated: removed legacy v1, v2, v2-new
     { id: 'kling-v1-5', name: 'Kling V1.5', provider: 'kling', supportsImageToImage: true, supportsMultiImage: false, resolutions: ["1K", "2K"], aspectRatios: ["Auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "21:9"] },

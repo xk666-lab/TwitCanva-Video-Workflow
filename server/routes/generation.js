@@ -12,9 +12,65 @@ import { generateKlingVideo, generateKlingImage, generateKlingMultiImage } from 
 import { generateGeminiImage, generateVeoVideo } from '../services/gemini.js';
 import { generateHailuoVideo } from '../services/hailuo.js';
 import { generateOpenAIImage } from '../services/openai.js';
+import { generateSeedanceVideo } from '../services/seedance.js';
+import { createMediaTake } from '../services/takeMetadata.js';
+import { isSeedanceVideoModel } from '../services/videoModelRouting.js';
 import { resolveImageToBase64, saveBufferToFile } from '../utils/imageHelpers.js';
 
 const router = express.Router();
+
+function readJsonFile(filePath) {
+    try {
+        return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    } catch {
+        return null;
+    }
+}
+
+function metadataToTake(meta, url, fallbackType) {
+    if (!meta) return null;
+    const mediaType = meta.mediaType || fallbackType;
+    return createMediaTake({
+        id: meta.takeId || meta.id,
+        nodeId: meta.nodeId || meta.id,
+        type: mediaType,
+        url,
+        prompt: meta.prompt || '',
+        model: meta.model || '',
+        createdAt: meta.createdAt,
+        thumbnailUrl: meta.thumbnailUrl,
+        metadata: {
+            filename: meta.filename,
+            aspectRatio: meta.aspectRatio,
+            resolution: meta.resolution
+        }
+    });
+}
+
+function findLatestTakeForNode(nodeId, dirs) {
+    const matches = [];
+
+    for (const { dir, mediaType, urlType } of dirs) {
+        if (!fs.existsSync(dir)) continue;
+
+        for (const file of fs.readdirSync(dir)) {
+            if (!file.endsWith('.json')) continue;
+            const meta = readJsonFile(path.join(dir, file));
+            if (!meta || (meta.nodeId !== nodeId && meta.id !== nodeId)) continue;
+
+            const url = `/library/${urlType}/${meta.filename}`;
+            matches.push({
+                meta,
+                url,
+                type: mediaType,
+                createdAt: new Date(meta.createdAt || 0).getTime()
+            });
+        }
+    }
+
+    matches.sort((a, b) => b.createdAt - a.createdAt);
+    return matches[0] || null;
+}
 
 // ============================================================================
 // IMAGE GENERATION
@@ -22,8 +78,10 @@ const router = express.Router();
 
 router.post('/generate-image', async (req, res) => {
     try {
-        const { nodeId, prompt, aspectRatio, resolution, imageBase64: rawImageBase64, imageModel, klingReferenceMode, klingFaceIntensity, klingSubjectIntensity } = req.body;
-        const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, OPENAI_API_KEY, IMAGES_DIR } = req.app.locals;
+        const { nodeId, prompt, aspectRatio, resolution, imageBase64: rawImageBase64, imageModel: requestedImageModel, klingReferenceMode, klingFaceIntensity, klingSubjectIntensity } = req.body;
+        const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_IMAGE_MODEL, IMAGES_DIR } = req.app.locals;
+        const selectedImageModel = requestedImageModel || OPENAI_IMAGE_MODEL || 'gpt-image-2';
+        const imageModel = selectedImageModel === 'gpt-image-1.5' ? 'gpt-image-2' : selectedImageModel;
 
         // Determine provider
         const isKlingModel = imageModel && imageModel.startsWith('kling-');
@@ -130,7 +188,9 @@ router.post('/generate-image', async (req, res) => {
                 imageBase64Array,
                 aspectRatio,
                 resolution,
-                apiKey: OPENAI_API_KEY
+                apiKey: OPENAI_API_KEY,
+                baseURL: OPENAI_BASE_URL,
+                model: imageModel
             });
 
         } else {
@@ -157,22 +217,35 @@ router.post('/generate-image', async (req, res) => {
         // Save to library - use unique filename to preserve previous generations
         const saved = saveBufferToFile(imageBuffer, IMAGES_DIR, 'img', imageFormat);
 
-        // Determine metadata ID: use nodeId for recovery if available, otherwise use file ID
-        const metadataId = nodeId || saved.id;
+        const createdAt = new Date().toISOString();
+        const take = createMediaTake({
+            nodeId: nodeId || saved.id,
+            type: 'image',
+            url: saved.url,
+            prompt,
+            model: imageModel || 'gemini-pro',
+            createdAt,
+            metadata: {
+                filename: saved.filename,
+                format: imageFormat
+            }
+        });
 
-        // Save metadata (id must match the metadata filename for delete to work)
         const metadata = {
-            id: metadataId,  // Must match the filename for delete API to find it
+            id: take.id,
+            takeId: take.id,
+            nodeId: nodeId || saved.id,
             filename: saved.filename,
             prompt: prompt,
             model: imageModel || 'gemini-pro',
-            createdAt: new Date().toISOString(),
-            type: 'images'
+            createdAt,
+            type: 'images',
+            mediaType: 'image'
         };
-        fs.writeFileSync(path.join(IMAGES_DIR, `${metadataId}.json`), JSON.stringify(metadata, null, 2));
+        fs.writeFileSync(path.join(IMAGES_DIR, `${take.id}.json`), JSON.stringify(metadata, null, 2));
 
         console.log(`Image saved: ${saved.url} (model: ${imageModel || 'gemini-pro'})`);
-        return res.json({ resultUrl: saved.url });
+        return res.json({ resultUrl: saved.url, take });
 
     } catch (error) {
         console.error("Server Image Gen Error:", error);
@@ -187,16 +260,24 @@ router.post('/generate-image', async (req, res) => {
 router.post('/generate-video', async (req, res) => {
     try {
         const { nodeId, prompt, imageBase64: rawImageBase64, lastFrameBase64: rawLastFrameBase64, motionReferenceUrl: rawMotionReferenceUrl, aspectRatio, resolution, duration, videoModel } = req.body;
-        const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, HAILUO_API_KEY, VIDEOS_DIR } = req.app.locals;
+        const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, HAILUO_API_KEY, SEEDANCE_API_KEY, SEEDANCE_BASE_URL, SEEDANCE_SUBMIT_PATH, SEEDANCE_STATUS_PATH, VIDEOS_DIR } = req.app.locals;
 
-        // Resolve file URLs to base64
-        const imageBase64 = resolveImageToBase64(rawImageBase64);
+        // Resolve file URLs to base64. Seedance can receive multiple image references;
+        // other video providers keep using the first image as the start frame.
+        const rawImageInputs = Array.isArray(rawImageBase64)
+            ? rawImageBase64.filter(Boolean)
+            : (rawImageBase64 ? [rawImageBase64] : []);
+        const imageBase64 = resolveImageToBase64(rawImageInputs[0]);
+        const seedanceImageBase64Array = rawImageInputs
+            .map(input => resolveImageToBase64(input))
+            .filter(Boolean);
         const lastFrameBase64 = resolveImageToBase64(rawLastFrameBase64);
         const motionReferenceUrl = resolveImageToBase64(rawMotionReferenceUrl);
 
         // Determine provider
         const isKlingModel = videoModel && videoModel.startsWith('kling-');
         const isHailuoModel = videoModel && videoModel.startsWith('hailuo-');
+        const isSeedanceModel = isSeedanceVideoModel(videoModel);
 
         let videoBuffer;
 
@@ -312,6 +393,42 @@ router.post('/generate-video', async (req, res) => {
             }
             videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
 
+        } else if (isSeedanceModel) {
+            // --- SEEDANCE 2.0 VIDEO GENERATION ---
+            if (!SEEDANCE_API_KEY) {
+                return res.status(500).json({
+                    error: "Seedance API key not configured. Add SEEDANCE_API_KEY to .env"
+                });
+            }
+
+            console.log(`Using Seedance model: ${videoModel}, duration: ${duration || 'Auto'}`);
+
+            const seedanceVideoUrl = await generateSeedanceVideo({
+                prompt,
+                imageBase64: seedanceImageBase64Array.length > 0 ? seedanceImageBase64Array : imageBase64,
+                imageReference: rawImageInputs.length > 0 ? rawImageInputs : rawImageBase64,
+                videoReference: rawMotionReferenceUrl,
+                modelId: videoModel,
+                aspectRatio,
+                resolution,
+                duration: undefined,
+                generateAudio: req.body.generateAudio,
+                watermark: req.body.watermark,
+                apiKey: SEEDANCE_API_KEY,
+                baseUrl: SEEDANCE_BASE_URL,
+                submitPath: SEEDANCE_SUBMIT_PATH,
+                statusPath: SEEDANCE_STATUS_PATH,
+                assetStorage: {
+                    libraryDir: req.app.locals.LIBRARY_DIR
+                }
+            });
+
+            const videoResponse = await fetch(seedanceVideoUrl);
+            if (!videoResponse.ok) {
+                throw new Error('Failed to download video from Seedance');
+            }
+            videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+
         } else {
             // --- VEO VIDEO GENERATION (Default) ---
             if (!GEMINI_API_KEY) {
@@ -335,28 +452,43 @@ router.post('/generate-video', async (req, res) => {
         // Save to library - use unique filename to preserve previous generations
         const saved = saveBufferToFile(videoBuffer, VIDEOS_DIR, 'vid', 'mp4');
 
-        // Determine metadata ID: use nodeId for recovery if available, otherwise use file ID
-        const metadataId = nodeId || saved.id;
+        const createdAt = new Date().toISOString();
+        const take = createMediaTake({
+            nodeId: nodeId || saved.id,
+            type: 'video',
+            url: saved.url,
+            prompt,
+            model: videoModel || 'veo-3.1',
+            createdAt,
+            metadata: {
+                filename: saved.filename,
+                aspectRatio: aspectRatio || 'Auto',
+                resolution: resolution || 'Auto'
+            }
+        });
 
-        // Save metadata (id must match the metadata filename for delete to work)
         const metadata = {
-            id: metadataId,  // Must match the filename for delete API to find it
+            id: take.id,
+            takeId: take.id,
+            nodeId: nodeId || saved.id,
             filename: saved.filename,
             prompt: prompt,
             model: videoModel || 'veo-3.1',
             aspectRatio: aspectRatio || 'Auto',
             resolution: resolution || 'Auto',
-            createdAt: new Date().toISOString(),
-            type: 'videos'
+            createdAt,
+            type: 'videos',
+            mediaType: 'video'
         };
-        fs.writeFileSync(path.join(VIDEOS_DIR, `${metadataId}.json`), JSON.stringify(metadata, null, 2));
+        fs.writeFileSync(path.join(VIDEOS_DIR, `${take.id}.json`), JSON.stringify(metadata, null, 2));
 
         console.log(`Video saved: ${saved.url} (model: ${videoModel || 'veo-3.1'})`);
-        return res.json({ resultUrl: saved.url });
+        return res.json({ resultUrl: saved.url, take });
 
     } catch (error) {
         console.error("Server Video Gen Error:", error);
-        res.status(500).json({ error: error.message || "Video generation failed" });
+        const statusCode = String(error.message || '').toLowerCase().includes('seedance') ? 502 : 500;
+        res.status(statusCode).json({ error: error.message || "Video generation failed" });
     }
 });
 
@@ -373,18 +505,19 @@ router.get('/generation-status/:nodeId', async (req, res) => {
         const { nodeId } = req.params;
         const { IMAGES_DIR, VIDEOS_DIR } = req.app.locals;
 
-        // Check images metadata
-        const imageMetaPath = path.join(IMAGES_DIR, `${nodeId}.json`);
-        if (fs.existsSync(imageMetaPath)) {
-            const meta = JSON.parse(fs.readFileSync(imageMetaPath, 'utf8'));
-            return res.json({ status: 'success', resultUrl: `/library/images/${meta.filename}`, type: 'image', createdAt: meta.createdAt });
-        }
+        const latest = findLatestTakeForNode(nodeId, [
+            { dir: IMAGES_DIR, mediaType: 'image', urlType: 'images' },
+            { dir: VIDEOS_DIR, mediaType: 'video', urlType: 'videos' }
+        ]);
 
-        // Check videos metadata
-        const videoMetaPath = path.join(VIDEOS_DIR, `${nodeId}.json`);
-        if (fs.existsSync(videoMetaPath)) {
-            const meta = JSON.parse(fs.readFileSync(videoMetaPath, 'utf8'));
-            return res.json({ status: 'success', resultUrl: `/library/videos/${meta.filename}`, type: 'video', createdAt: meta.createdAt });
+        if (latest) {
+            return res.json({
+                status: 'success',
+                resultUrl: latest.url,
+                type: latest.type,
+                createdAt: latest.meta.createdAt,
+                take: metadataToTake(latest.meta, latest.url, latest.type)
+            });
         }
 
         res.json({ status: 'pending' });

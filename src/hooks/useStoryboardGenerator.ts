@@ -37,6 +37,7 @@ export interface StoryboardState {
     scripts: SceneScript[];
     styleAnchor: string;
     characterDNA: Record<string, string>;
+    selectedImageModel: string;
     compositeImageUrl: string | null;
     isGeneratingPreview: boolean;
     isGenerating: boolean;
@@ -52,6 +53,7 @@ export interface StoryboardState {
 interface StoryboardGroupInfo {
     groupId: string;
     groupLabel: string;
+    openVideoAfterImages?: boolean;
     storyContext?: {
         story: string;
         scripts: SceneScript[];
@@ -60,12 +62,17 @@ interface StoryboardGroupInfo {
         styleAnchor?: string;
         characterDNA?: Record<string, string>;
         compositeImageUrl?: string | null;
+        selectedImageModel?: string;
     };
 }
 
 interface UseStoryboardGeneratorProps {
     onCreateNodes: (nodes: Partial<NodeData>[], groupInfo?: StoryboardGroupInfo) => void;
     viewport: Viewport;
+}
+
+interface CreateStoryboardNodesOptions {
+    continueToVideo?: boolean;
 }
 
 export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboardGeneratorProps) => {
@@ -78,6 +85,7 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
         scripts: [],
         styleAnchor: '',
         characterDNA: {},
+        selectedImageModel: 'gpt-image-2',
         compositeImageUrl: null,
         isGeneratingPreview: false,
         isGenerating: false,
@@ -101,6 +109,7 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
             scripts: [],
             styleAnchor: '',
             characterDNA: {},
+            selectedImageModel: 'gpt-image-2',
             compositeImageUrl: null,
             isGeneratingPreview: false,
             isGenerating: false,
@@ -157,7 +166,11 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
     }, []);
 
     const setSelectedImageModel = useCallback((model: string) => {
-        setState(prev => ({ ...prev, selectedImageModel: model }));
+        setState(prev => ({
+            ...prev,
+            selectedImageModel: model,
+            compositeImageUrl: model === prev.selectedImageModel ? prev.compositeImageUrl : null
+        }));
     }, []);
 
     const updateScript = useCallback((index: number, updates: Partial<SceneScript>) => {
@@ -217,6 +230,7 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
             const data = await response.json();
             setState(prev => ({
                 ...prev,
+                story: data.story || prev.story,
                 scripts: data.scripts,
                 styleAnchor: data.styleAnchor || '',
                 characterDNA: data.characterDNA || {},
@@ -228,6 +242,64 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
             setState(prev => ({
                 ...prev,
                 error: error instanceof Error ? error.message : 'Failed to generate scripts',
+                isGenerating: false
+            }));
+        }
+    }, [state.story, state.selectedCharacters, state.sceneCount]);
+
+    const generateStoryPackage = useCallback(async () => {
+        if (!state.story.trim()) {
+            setState(prev => ({ ...prev, error: 'Please enter a story' }));
+            return;
+        }
+
+        setState(prev => ({
+            ...prev,
+            isGenerating: true,
+            error: null,
+            step: 'scripts',
+            scripts: []
+        }));
+
+        try {
+            const response = await fetch('/api/storyboard/generate-story-package', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    story: state.story,
+                    characterDescriptions: state.selectedCharacters.map(c => ({
+                        name: c.name,
+                        description: c.description || 'A reference',
+                        category: c.category || 'Others'
+                    })),
+                    referenceImages: state.selectedCharacters.map(char => ({
+                        name: char.name,
+                        url: char.url,
+                        category: char.category || 'Others'
+                    })),
+                    sceneCount: state.sceneCount
+                })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Failed to generate story package');
+            }
+
+            const data = await response.json();
+            setState(prev => ({
+                ...prev,
+                story: data.story || prev.story,
+                scripts: data.scripts || [],
+                styleAnchor: data.styleAnchor || '',
+                characterDNA: data.characterDNA || {},
+                isGenerating: false
+            }));
+        } catch (error) {
+            console.error('[Storyboard] Story package generation error:', error);
+            setState(prev => ({
+                ...prev,
+                error: error instanceof Error ? error.message : 'Failed to generate story package',
                 isGenerating: false
             }));
         }
@@ -327,6 +399,7 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
                     styleAnchor: state.styleAnchor,
                     characterDNA: state.characterDNA,
                     sceneCount: state.scripts.length,
+                    imageModel: state.selectedImageModel || 'gpt-image-2',
                     // Pass reference images with their categories
                     referenceImages: state.selectedCharacters.map(char => ({
                         name: char.name,
@@ -356,7 +429,7 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
                 isGeneratingPreview: false
             }));
         }
-    }, [state.scripts, state.styleAnchor, state.characterDNA]);
+    }, [state.scripts, state.styleAnchor, state.characterDNA, state.selectedCharacters, state.selectedImageModel]);
 
     // Regenerate composite image if user wants to try again
     const regenerateComposite = useCallback(async () => {
@@ -369,7 +442,7 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
     // NODE CREATION
     // ============================================================================
 
-    const createStoryboardNodes = useCallback(() => {
+    const createStoryboardNodes = useCallback((options: CreateStoryboardNodesOptions = {}) => {
         if (state.scripts.length === 0) {
             setState(prev => ({ ...prev, error: 'No scripts to create' }));
             return;
@@ -394,6 +467,7 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
         const storyboardGroupId = crypto.randomUUID();
 
         // Create nodes for each script - use composite image as reference
+        const selectedImageModel = state.selectedImageModel || 'gpt-image-2';
         const newNodes: Partial<NodeData>[] = state.scripts.map((script, index) => {
             // Build scene extraction prompt that references the composite storyboard
             // The composite image will be passed as the reference image
@@ -415,9 +489,8 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
                 prompt,
                 // Set to IDLE - handleGenerate will set to LOADING when called
                 status: NodeStatus.IDLE,
-                // Default to Nano Banana Pro (gemini-3-pro-image-preview)
-                model: 'gemini-pro',
-                imageModel: 'gemini-3-pro-image-preview',
+                model: selectedImageModel,
+                imageModel: selectedImageModel,
                 aspectRatio: '16:9',
                 resolution: '1K',
                 title: `Scene ${sceneNumber}`,
@@ -433,6 +506,7 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
         onCreateNodes(newNodes, {
             groupId: storyboardGroupId,
             groupLabel: `Storyboard ${new Date().toLocaleTimeString()}`,
+            openVideoAfterImages: options.continueToVideo === true,
             storyContext: {
                 story: state.story,
                 scripts: state.scripts,
@@ -440,11 +514,12 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
                 sceneCount: state.sceneCount,
                 styleAnchor: state.styleAnchor,
                 characterDNA: state.characterDNA,
-                compositeImageUrl: state.compositeImageUrl
+                compositeImageUrl: state.compositeImageUrl,
+                selectedImageModel: state.selectedImageModel
             }
         });
         closeModal();
-    }, [state.scripts, state.selectedCharacters, state.styleAnchor, state.compositeImageUrl, viewport, onCreateNodes, closeModal]);
+    }, [state.scripts, state.selectedCharacters, state.styleAnchor, state.compositeImageUrl, state.selectedImageModel, viewport, onCreateNodes, closeModal]);
 
     // Restore state from saved context to edit an existing storyboard
     const editStoryboard = useCallback((context: NonNullable<StoryboardGroupInfo['storyContext']>) => {
@@ -457,6 +532,7 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
             scripts: context.scripts,
             styleAnchor: context.styleAnchor || '',
             characterDNA: context.characterDNA || {},
+            selectedImageModel: context.selectedImageModel || 'gpt-image-2',
             compositeImageUrl: context.compositeImageUrl || null,
             isGeneratingPreview: false,
             isGenerating: false,
@@ -478,8 +554,10 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
         toggleCharacter,
         setSceneCount,
         setStory,
+        setSelectedImageModel,
         updateScript,
         generateScripts,
+        generateStoryPackage,
         brainstormStory,
         optimizeStory,
         generateComposite,

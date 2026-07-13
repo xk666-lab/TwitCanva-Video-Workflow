@@ -14,6 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createChatGraph, generateTopicTitle } from "./graph/chatGraph.js";
+import { generateOpenAIChatResponse, generateOpenAITopicTitle } from "../services/openaiChat.js";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 
 // ============================================================================
@@ -287,17 +288,34 @@ export function getSessionData(sessionId) {
 // CHAT FUNCTIONS
 // ============================================================================
 
+function normalizeChatConfig(configOrApiKey) {
+    if (typeof configOrApiKey === 'string') {
+        return {
+            provider: 'gemini',
+            apiKey: configOrApiKey,
+        };
+    }
+
+    return {
+        provider: configOrApiKey?.provider || 'gemini',
+        apiKey: configOrApiKey?.apiKey,
+        baseURL: configOrApiKey?.baseURL,
+        model: configOrApiKey?.model,
+        chatCompletionsPath: configOrApiKey?.chatCompletionsPath,
+    };
+}
+
 /**
  * Send a message to the chat agent and get a response
  * @param {string} sessionId - Session identifier
  * @param {string} content - User message content
  * @param {Array} media - Optional media attachments [{ type, url, base64 }, ...]
- * @param {string} apiKey - Google AI API key
+ * @param {string|object} configOrApiKey - Chat provider config or legacy Google AI API key
  * @returns {Promise<object>} { response: string, topic?: string }
  */
-export async function sendMessage(sessionId, content, media, apiKey) {
+export async function sendMessage(sessionId, content, media, configOrApiKey) {
     const session = getSession(sessionId);
-    const graph = createChatGraph();
+    const chatConfig = normalizeChatConfig(configOrApiKey);
 
     // Debug: Log session state
     console.log(`[Chat] Session ${sessionId} has ${session.messages.length} existing messages`);
@@ -358,14 +376,28 @@ export async function sendMessage(sessionId, content, media, apiKey) {
 
     console.log(`[Chat] Sending ${session.messages.length} messages to LLM`);
 
-    // Invoke the graph
-    const result = await graph.invoke(
-        { messages: session.messages },
-        { configurable: { apiKey } }
-    );
+    let aiResponse;
 
-    // Extract AI response from result
-    const aiResponse = result.messages[result.messages.length - 1];
+    if (chatConfig.provider === 'openai') {
+        const responseText = await generateOpenAIChatResponse({
+            messages: session.messages,
+            apiKey: chatConfig.apiKey,
+            baseURL: chatConfig.baseURL,
+            model: chatConfig.model,
+            chatCompletionsPath: chatConfig.chatCompletionsPath,
+        });
+        aiResponse = new AIMessage(responseText);
+    } else if (chatConfig.provider === 'gemini') {
+        const graph = createChatGraph();
+        const result = await graph.invoke(
+            { messages: session.messages },
+            { configurable: { apiKey: chatConfig.apiKey } }
+        );
+        aiResponse = result.messages[result.messages.length - 1];
+    } else {
+        throw new Error(`Unsupported chat provider: ${chatConfig.provider}`);
+    }
+
     session.messages.push(aiResponse);
 
     // Convert the multimodal user message to text for future context
@@ -389,7 +421,17 @@ export async function sendMessage(sessionId, content, media, apiKey) {
     let topic = session.topic;
     if (session.messages.length === 2 && !session.topic) {
         try {
-            topic = await generateTopicTitle(session.messages, apiKey);
+            if (chatConfig.provider === 'openai') {
+                topic = await generateOpenAITopicTitle({
+                    messages: session.messages,
+                    apiKey: chatConfig.apiKey,
+                    baseURL: chatConfig.baseURL,
+                    model: chatConfig.model,
+                    chatCompletionsPath: chatConfig.chatCompletionsPath,
+                });
+            } else {
+                topic = await generateTopicTitle(session.messages, chatConfig.apiKey);
+            }
             session.topic = topic;
         } catch (err) {
             console.error("Failed to generate topic:", err);

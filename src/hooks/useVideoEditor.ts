@@ -7,6 +7,7 @@
 
 import { useState, useCallback } from 'react';
 import { NodeData, NodeStatus } from '../types';
+import { apiPost } from '../services/apiClient';
 
 // ============================================================================
 // TYPES
@@ -95,22 +96,12 @@ export const useVideoEditor = ({ nodes, updateNode }: UseVideoEditorOptions) => 
             });
 
             // Call server endpoint to trim video
-            const response = await fetch('/api/trim-video', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    videoUrl,
-                    startTime: trimStart,
-                    endTime: trimEnd,
-                    nodeId
-                })
+            const result = await apiPost<{ url: string }>('/api/trim-video', {
+                videoUrl,
+                startTime: trimStart,
+                endTime: trimEnd,
+                nodeId
             });
-
-            if (!response.ok) {
-                throw new Error('Failed to trim video');
-            }
-
-            const result = await response.json();
 
             // Update node with trimmed video URL
             updateNode(nodeId, {

@@ -6,6 +6,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { apiDelete, apiGet, apiPost } from '../services/apiClient';
 
 // ============================================================================
 // TYPES
@@ -28,6 +29,22 @@ export interface ChatSession {
     createdAt: string;
     updatedAt?: string;
     messageCount: number;
+}
+
+interface ChatSessionDetail {
+    topic: string;
+    createdAt: string;
+    messages: Array<{
+        role: 'user' | 'assistant';
+        content: string;
+        media?: ChatMessage['media'];
+        timestamp?: string;
+    }>;
+}
+
+interface ChatResponse {
+    response: string;
+    topic?: string;
 }
 
 interface UseChatAgentReturn {
@@ -101,11 +118,7 @@ export function useChatAgent(): UseChatAgentReturn {
     const refreshSessions = useCallback(async () => {
         setIsLoadingSessions(true);
         try {
-            const response = await fetch('/api/chat/sessions');
-            if (response.ok) {
-                const data = await response.json();
-                setSessions(data);
-            }
+            setSessions(await apiGet<ChatSession[]>('/api/chat/sessions'));
         } catch (err) {
             console.error('Failed to fetch sessions:', err);
         } finally {
@@ -121,12 +134,7 @@ export function useChatAgent(): UseChatAgentReturn {
         setError(null);
 
         try {
-            const response = await fetch(`/api/chat/sessions/${targetSessionId}`);
-            if (!response.ok) {
-                throw new Error('Session not found');
-            }
-
-            const data = await response.json();
+            const data = await apiGet<ChatSessionDetail>(`/api/chat/sessions/${targetSessionId}`);
 
             // Convert messages to ChatMessage format
             const loadedMessages: ChatMessage[] = data.messages.map((msg: any, index: number) => ({
@@ -154,9 +162,7 @@ export function useChatAgent(): UseChatAgentReturn {
      */
     const deleteSession = useCallback(async (targetSessionId: string) => {
         try {
-            await fetch(`/api/chat/sessions/${targetSessionId}`, {
-                method: 'DELETE',
-            });
+            await apiDelete(`/api/chat/sessions/${targetSessionId}`);
 
             // Refresh sessions list
             await refreshSessions();
@@ -194,25 +200,14 @@ export function useChatAgent(): UseChatAgentReturn {
         setMessages(prev => [...prev, userMessage]);
 
         try {
-            const response = await fetch('/api/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    sessionId: currentSessionId,
-                    message: content,
-                    media: media ? media.map(m => ({
-                        type: m.type,
-                        base64: m.base64 || m.url, // Use base64 if available, otherwise URL
-                    })) : undefined,
-                }),
+            const data = await apiPost<ChatResponse>('/api/chat', {
+                sessionId: currentSessionId,
+                message: content,
+                media: media ? media.map(m => ({
+                    type: m.type,
+                    base64: m.base64 || m.url, // Use base64 if available, otherwise URL
+                })) : undefined,
             });
-
-            if (!response.ok) {
-                const errData = await response.json().catch(() => ({}));
-                throw new Error(errData.error || response.statusText);
-            }
-
-            const data = await response.json();
 
             // Add AI response
             const aiMessage: ChatMessage = {

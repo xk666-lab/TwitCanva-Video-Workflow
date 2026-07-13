@@ -7,6 +7,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Loader2, CheckCircle, AlertCircle, Send, LogOut } from 'lucide-react';
+import { apiGet, apiPost } from '../../services/apiClient';
 
 // ============================================================================
 // TYPES
@@ -23,6 +24,19 @@ interface TikTokUser {
     displayName: string;
     username: string;
     avatarUrl: string;
+}
+
+interface TikTokStatusResponse {
+    authenticated: boolean;
+    user?: TikTokUser;
+}
+
+interface TikTokAuthResponse {
+    authUrl: string;
+}
+
+interface TikTokPostResponse {
+    message?: string;
 }
 
 type PostStatus = 'idle' | 'authenticating' | 'posting' | 'success' | 'error';
@@ -125,8 +139,7 @@ export const TikTokPostModal: React.FC<TikTokPostModalProps> = ({
 
     const checkAuthStatus = async (session: string) => {
         try {
-            const response = await fetch(`http://localhost:3001/api/tiktok-post/status?sessionId=${session}`);
-            const data = await response.json();
+            const data = await apiGet<TikTokStatusResponse>(`/api/tiktok-post/status?sessionId=${session}`);
 
             if (data.authenticated && data.user) {
                 setUser(data.user);
@@ -148,12 +161,7 @@ export const TikTokPostModal: React.FC<TikTokPostModalProps> = ({
         setError(null);
 
         try {
-            const response = await fetch('http://localhost:3001/api/tiktok-post/auth');
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || 'Failed to start authentication');
-            }
+            const data = await apiGet<TikTokAuthResponse>('/api/tiktok-post/auth');
 
             // Open OAuth popup
             const popup = window.open(
@@ -176,8 +184,7 @@ export const TikTokPostModal: React.FC<TikTokPostModalProps> = ({
     const handleLogout = async () => {
         if (sessionId) {
             try {
-                await fetch('http://localhost:3001/api/tiktok-post/logout', {
-                    method: 'POST',
+                await apiPost('/api/tiktok-post/logout', undefined, {
                     headers: { 'X-TikTok-Session': sessionId }
                 });
             } catch (err) {
@@ -197,24 +204,15 @@ export const TikTokPostModal: React.FC<TikTokPostModalProps> = ({
         setError(null);
 
         try {
-            const response = await fetch('http://localhost:3001/api/tiktok-post/post', {
-                method: 'POST',
+            const data = await apiPost<TikTokPostResponse>('/api/tiktok-post/post', {
+                mediaUrl: mediaUrl,
+                title: captionText.trim(),
+                privacyLevel: privacyLevel
+            }, {
                 headers: {
-                    'Content-Type': 'application/json',
                     'X-TikTok-Session': sessionId
-                },
-                body: JSON.stringify({
-                    mediaUrl: mediaUrl,
-                    title: captionText.trim(),
-                    privacyLevel: privacyLevel
-                })
+                }
             });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || 'Failed to post to TikTok');
-            }
 
             setSuccessMessage(data.message || 'Video posted successfully!');
             setStatus('success');
@@ -238,7 +236,7 @@ export const TikTokPostModal: React.FC<TikTokPostModalProps> = ({
     // Build the full media URL for display
     const fullMediaUrl = mediaUrl?.startsWith('http')
         ? mediaUrl
-        : `http://localhost:3001${mediaUrl}`;
+        : `${mediaUrl}`;
 
     return (
         <div
@@ -383,7 +381,7 @@ export const TikTokPostModal: React.FC<TikTokPostModalProps> = ({
                             {/* Sandbox Warning */}
                             <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
                                 <p className="text-xs text-yellow-400">
-                                    ⚠️ Videos posted from unaudited apps are private-only until TikTok approves your app.
+                                    Warning: Videos posted from unaudited apps are private-only until TikTok approves your app.
                                 </p>
                             </div>
 
