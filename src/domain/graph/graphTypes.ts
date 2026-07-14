@@ -1,4 +1,4 @@
-export type PortDataType = 'text' | 'image' | 'video' | 'audio' | 'storyboard' | 'any';
+export type PortDataType = 'text' | 'image' | 'video' | 'audio' | 'script' | 'storyboard' | 'any';
 
 export interface NodePortDefinition {
   id: string;

@@ -11,6 +11,7 @@ export enum NodeType {
   AUDIO = '音频',
   IMAGE_EDITOR = '图片编辑器',
   VIDEO_EDITOR = '视频编辑器',
+  SCRIPT = '脚本',
   STORYBOARD = '分镜管理器',
   CAMERA_ANGLE = '镜头角度',
   // Local open-source model nodes

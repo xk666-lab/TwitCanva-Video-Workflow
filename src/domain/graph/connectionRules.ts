@@ -133,6 +133,14 @@ export function resolveConnectionPorts(
   const sourceType = String(sourceNode.type);
   const targetType = String(targetNode.type);
 
+  if (sourceType === '文本' && targetType === '脚本') {
+    return resolved(sourceNode, 'text-output', targetNode, 'text-input');
+  }
+
+  if (sourceType === '脚本' && targetType === '分镜管理器') {
+    return resolved(sourceNode, 'script-output', targetNode, 'script-input');
+  }
+
   if (sourceType === '文本') {
     if (['图片', '视频', '本地图片模型', '本地视频模型'].includes(targetType)) {
       return resolved(sourceNode, 'text-output', targetNode, 'prompt-input');

@@ -10,7 +10,7 @@ import {
 type WarningHandler = (message: string) => void;
 type UnknownRecord = Record<string, unknown>;
 
-const PORT_DATA_TYPES = new Set<PortDataType>(['text', 'image', 'video', 'audio', 'storyboard', 'any']);
+const PORT_DATA_TYPES = new Set<PortDataType>(['text', 'image', 'video', 'audio', 'script', 'storyboard', 'any']);
 
 function asRecord(value: unknown): UnknownRecord {
   return value !== null && typeof value === 'object' && !Array.isArray(value)

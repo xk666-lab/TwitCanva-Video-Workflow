@@ -28,8 +28,16 @@ test('core generation nodes expose the expected typed ports', () => {
   assert.equal(getNodePort('视频', 'last-frame-output')?.dataType, 'image');
 });
 
-test('audio and storyboard ports are defined but disabled for this phase', () => {
+test('audio ports are defined but disabled for this phase', () => {
   assert.ok(getInputPorts('音频').every(port => port.enabled === false));
   assert.ok(getOutputPorts('音频').every(port => port.enabled === false));
-  assert.ok(getOutputPorts('分镜管理器').every(port => port.enabled === false));
+});
+
+test('script and storyboard expose active typed ports', () => {
+  assert.equal(getNodePort('脚本', 'text-input')?.dataType, 'text');
+  assert.equal(getNodePort('脚本', 'script-output')?.dataType, 'script');
+  assert.equal(getNodePort('分镜管理器', 'script-input')?.dataType, 'script');
+  assert.equal(getNodePort('分镜管理器', 'storyboard-output')?.dataType, 'storyboard');
+  assert.ok(getInputPorts('分镜管理器').every(port => port.enabled !== false));
+  assert.ok(getOutputPorts('分镜管理器').every(port => port.enabled !== false));
 });

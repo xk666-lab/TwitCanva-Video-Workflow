@@ -53,6 +53,33 @@ test('TEXT to TEXT and VIDEO to IMAGE are rejected', () => {
   assert.equal(resolveConnectionPorts(node('video', '视频'), node('image', '图片'), []).valid, false);
 });
 
+test('TEXT to SCRIPT and SCRIPT to STORYBOARD resolve through typed ports', () => {
+  const textToScript = resolveConnectionPorts(node('text', '文本'), node('script', '脚本'), []);
+  assert.equal(textToScript.valid, true);
+  if (textToScript.valid) {
+    assert.equal(textToScript.sourcePort.id, 'text-output');
+    assert.equal(textToScript.targetPort.id, 'text-input');
+  }
+
+  const scriptToStoryboard = resolveConnectionPorts(
+    node('script', '脚本'),
+    node('storyboard', '分镜管理器'),
+    []
+  );
+  assert.equal(scriptToStoryboard.valid, true);
+  if (scriptToStoryboard.valid) {
+    assert.equal(scriptToStoryboard.sourcePort.id, 'script-output');
+    assert.equal(scriptToStoryboard.targetPort.id, 'script-input');
+  }
+});
+
+test('IMAGE cannot connect to STORYBOARD', () => {
+  assert.equal(
+    resolveConnectionPorts(node('image', '图片'), node('storyboard', '分镜管理器'), []).valid,
+    false
+  );
+});
+
 test('first IMAGE to VIDEO connection resolves to start-frame', () => {
   const resolution = resolveConnectionPorts(node('image', '图片'), node('video', '视频'), []);
 

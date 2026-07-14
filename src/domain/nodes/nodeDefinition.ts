@@ -10,6 +10,7 @@ export type NodeIconKey =
   | 'audio'
   | 'image-editor'
   | 'video-editor'
+  | 'script'
   | 'storyboard'
   | 'camera-angle'
   | 'local-image-model'

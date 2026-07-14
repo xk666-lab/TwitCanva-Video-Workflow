@@ -19,6 +19,7 @@ const NODE_TYPES = [
   '音频',
   '图片编辑器',
   '视频编辑器',
+  '脚本',
   '分镜管理器',
   '镜头角度',
   '本地图片模型',
@@ -67,6 +68,18 @@ test('image and video defaults use the current production models', () => {
   assert.equal(image.imageModel, 'gpt-image-2');
   assert.equal(video.model, DEFAULT_SEEDANCE_VIDEO_MODEL_ID);
   assert.equal(video.videoModel, DEFAULT_SEEDANCE_VIDEO_MODEL_ID);
+});
+
+test('script and storyboard defaults contain fresh persistent documents', () => {
+  const firstScript = createDefaultNodeData('脚本' as NodeType);
+  const secondScript = createDefaultNodeData('脚本' as NodeType);
+  const storyboard = createDefaultNodeData('分镜管理器' as NodeType);
+
+  assert.equal(firstScript.model, 'auto-text');
+  assert.equal(firstScript.scriptData?.sourceText, '');
+  assert.notEqual(firstScript.scriptData, secondScript.scriptData);
+  assert.equal(storyboard.model, 'auto-storyboard');
+  assert.deepEqual(storyboard.storyboardData?.shots, []);
 });
 
 test('local model defaults remain specialized', () => {

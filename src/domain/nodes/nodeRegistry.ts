@@ -1,6 +1,10 @@
 import type { NodeData, NodeType } from '../../types';
 import { DEFAULT_SEEDANCE_VIDEO_MODEL_ID } from '../../utils/videoModelRouting.ts';
 import type { NodePortDefinition } from '../graph/graphTypes.ts';
+import {
+  createEmptyScriptDocument,
+  createEmptyStoryboardDocument
+} from '../storyboard/storyboardDocuments.ts';
 import type {
   NodeCapabilities,
   NodeCreationDefaults,
@@ -14,6 +18,7 @@ const TYPES = {
   AUDIO: '音频' as NodeType,
   IMAGE_EDITOR: '图片编辑器' as NodeType,
   VIDEO_EDITOR: '视频编辑器' as NodeType,
+  SCRIPT: '脚本' as NodeType,
   STORYBOARD: '分镜管理器' as NodeType,
   CAMERA_ANGLE: '镜头角度' as NodeType,
   LOCAL_IMAGE_MODEL: '本地图片模型' as NodeType,
@@ -145,15 +150,37 @@ const definitions: NodeDefinition[] = [
     ]
   },
   {
+    type: TYPES.SCRIPT,
+    label: '脚本',
+    icon: 'script',
+    category: 'story',
+    description: '持久化故事、剧本和视觉设定',
+    defaultData: () => ({
+      ...genericDefaults(),
+      model: 'auto-text',
+      scriptData: createEmptyScriptDocument()
+    }),
+    capabilities: { acceptsPrompt: true, supportsGeneration: true },
+    ports: [
+      { id: 'text-input', label: '故事文本', direction: 'input', dataType: 'text', maxConnections: 1, role: 'source-text' },
+      { id: 'script-output', label: '脚本', direction: 'output', dataType: 'script', multiple: true, role: 'script' }
+    ]
+  },
+  {
     type: TYPES.STORYBOARD,
     label: '分镜管理器',
     icon: 'storyboard',
     category: 'story',
     description: '预留的持久化分镜节点类型',
-    defaultData: genericDefaults,
-    capabilities: { acceptsPrompt: true },
+    defaultData: () => ({
+      ...genericDefaults(),
+      model: 'auto-storyboard',
+      storyboardData: createEmptyStoryboardDocument()
+    }),
+    capabilities: { supportsGeneration: true, supportsEditor: true },
     ports: [
-      { id: 'storyboard-output', label: '分镜', direction: 'output', dataType: 'storyboard', multiple: true, enabled: false }
+      { id: 'script-input', label: '脚本', direction: 'input', dataType: 'script', required: true, maxConnections: 1, role: 'script' },
+      { id: 'storyboard-output', label: '分镜', direction: 'output', dataType: 'storyboard', multiple: true, role: 'storyboard' }
     ]
   },
   {
