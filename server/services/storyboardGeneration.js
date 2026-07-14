@@ -236,7 +236,7 @@ async function requestGeminiScriptsWithReferences(locals, payload, dependencies 
 Create a cinematic storyboard that tells a REAL story like a movie scene, with professional camera work.
 
 REQUIREMENTS:
-1. **Character Consistency**: 
+1. **Character Consistency**:
    - If reference images are provided, use them as the ABSOLUTE GROUND TRUTH for gender, age, clothing, and physical appearance.
    - If no image is provided, create a detailed specific look and keep it consistent.
 
