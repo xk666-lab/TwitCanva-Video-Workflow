@@ -153,6 +153,7 @@ export default function App() {
     setSelectedNodeIds,
     addNode,
     updateNode,
+    applyNodeUpdates,
     deleteNode,
     deleteNodes,
     removeEdge,
@@ -418,7 +419,8 @@ export default function App() {
   // Generation Recovery Management
   useGenerationRecovery({
     nodes,
-    updateNode
+    updateNode,
+    applyNodeUpdates
   });
 
   // Video Frame Extraction (auto-extract lastFrame for videos missing thumbnails)

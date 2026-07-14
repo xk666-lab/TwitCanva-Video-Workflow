@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { GenerationTask } from '../domain/generation/generationTask.ts';
-import { buildGenerationTaskNodeUpdates } from '../domain/generation/taskResultUpdates.ts';
+import {
+  buildGenerationTaskNodeUpdates,
+  buildStoryTaskStartUpdates,
+  getUniqueActiveTaskIds
+} from '../domain/generation/taskResultUpdates.ts';
 import { createDefaultNodeData } from '../domain/nodes/nodeRegistry.ts';
 import { applyNodeUpdateMap } from '../domain/nodes/nodeUpdates.ts';
 import type { NodeData } from '../types.ts';
@@ -160,4 +164,34 @@ test('story package cancellation marks both matching nodes terminal without repl
   const updatedNodes = applyNodeUpdateMap(currentNodes, updates);
   assert.equal(updatedNodes[0].scriptData, scriptDocument);
   assert.equal(updatedNodes[1].storyboardData, storyboardDocument);
+});
+
+test('active task ids are deduplicated for paired story nodes', () => {
+  assert.deepEqual(getUniqueActiveTaskIds(nodes()), ['task-1']);
+});
+
+test('story task start updates bind the same task to both matching revisions', () => {
+  const updates = buildStoryTaskStartUpdates(nodes(), task({
+    status: 'queued',
+    progress: 0,
+    output: undefined
+  }));
+
+  assert.equal(updates['script-1'].activeTaskId, 'task-1');
+  assert.equal(updates['storyboard-1'].activeTaskId, 'task-1');
+  assert.equal(updates['script-1'].status, 'loading');
+});
+
+test('story task start refuses stale retry snapshots', () => {
+  const changed = nodes();
+  changed[0] = {
+    ...changed[0],
+    activeTaskId: undefined,
+    scriptData: { ...changed[0].scriptData!, revision: 3 }
+  };
+  assert.deepEqual(buildStoryTaskStartUpdates(changed, task({
+    taskId: 'task-retry',
+    status: 'queued',
+    output: undefined
+  })), {});
 });

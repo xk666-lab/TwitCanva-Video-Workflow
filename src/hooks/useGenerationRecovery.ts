@@ -11,15 +11,17 @@ import { apiGet } from '../services/apiClient';
 import { queryGenerationTasks } from '../services/generationService';
 import type { GenerationTask } from '../domain/generation/generationTask';
 import {
-    buildGenerationTaskNodeUpdate,
-    canApplyGenerationTaskResult
-} from '../utils/generationTaskHelpers';
+    buildGenerationTaskNodeUpdates,
+    getUniqueActiveTaskIds
+} from '../domain/generation/taskResultUpdates';
+import type { NodeUpdateMap } from '../domain/nodes/nodeUpdates';
 import { buildGenerationSuccessUpdate } from '../utils/takeHelpers';
 import { extractVideoLastFrame } from '../utils/videoHelpers';
 
 interface UseGenerationRecoveryOptions {
     nodes: NodeData[];
     updateNode: (id: string, updates: Partial<NodeData>) => void;
+    applyNodeUpdates: (updates: NodeUpdateMap) => void;
 }
 
 const TASK_POLL_INTERVAL_MS = 3000;
@@ -66,7 +68,8 @@ function readVideoResultAspectRatio(url: string): Promise<Partial<Pick<NodeData,
 
 export const useGenerationRecovery = ({
     nodes,
-    updateNode
+    updateNode,
+    applyNodeUpdates
 }: UseGenerationRecoveryOptions) => {
     // Use a ref to access current nodes without causing re-renders
     const nodesRef = useRef<NodeData[]>(nodes);
@@ -133,17 +136,19 @@ export const useGenerationRecovery = ({
     }, [updateNode]); // Only updateNode as dependency, nodes accessed via ref
 
     const applyTask = useCallback(async (task: GenerationTask) => {
-        const node = nodesRef.current.find(candidate => candidate.id === task.nodeId);
-        if (!node || !canApplyGenerationTaskResult(node, task)) return;
-        if (task.status !== 'succeeded' && task.status !== 'failed' && task.status !== 'cancelled') return;
+        const updates = buildGenerationTaskNodeUpdates(nodesRef.current, task);
+        if (Object.keys(updates).length === 0) return;
 
         const extraUpdates: Partial<NodeData> = {};
-        if (task.status === 'succeeded' && task.output?.resultUrl) {
+        const mediaResultUrl = task.status === 'succeeded' && task.operation !== 'generate-story-package'
+            ? task.output?.resultUrl
+            : undefined;
+        if (mediaResultUrl) {
             if (task.operation === 'generate-video') {
                 try {
                     const [lastFrame, videoMetadata] = await Promise.all([
-                        extractVideoLastFrame(task.output.resultUrl),
-                        readVideoResultAspectRatio(task.output.resultUrl)
+                        extractVideoLastFrame(mediaResultUrl),
+                        readVideoResultAspectRatio(mediaResultUrl)
                     ]);
                     extraUpdates.lastFrame = lastFrame;
                     Object.assign(extraUpdates, videoMetadata);
@@ -151,58 +156,47 @@ export const useGenerationRecovery = ({
                     console.error(`[Recovery] Failed to inspect video result for task ${task.taskId}:`, error);
                 }
             } else {
-                extraUpdates.resultAspectRatio = await readImageResultAspectRatio(task.output.resultUrl);
+                extraUpdates.resultAspectRatio = await readImageResultAspectRatio(mediaResultUrl);
             }
+
+            const currentUpdates = buildGenerationTaskNodeUpdates(nodesRef.current, task);
+            if (Object.keys(currentUpdates).length === 0) return;
+            updates[task.nodeId] = {
+                ...currentUpdates[task.nodeId],
+                ...extraUpdates
+            };
         }
+        applyNodeUpdates(updates);
+    }, [applyNodeUpdates]);
 
-        const currentNode = nodesRef.current.find(candidate => candidate.id === task.nodeId);
-        if (!currentNode || !canApplyGenerationTaskResult(currentNode, task)) return;
-        updateNode(currentNode.id, {
-            ...buildGenerationTaskNodeUpdate(currentNode, task),
-            ...extraUpdates
-        });
-    }, [updateNode]);
-
-    // Track loading node IDs for stable dependency
-    const loadingNodeIds = nodes
-        .filter(n => n.status === NodeStatus.LOADING)
-        .map(n => `${n.id}:${n.activeTaskId || 'legacy'}`)
-        .join(',');
+    const loadingNodes = nodes.filter(node => node.status === NodeStatus.LOADING);
+    const activeTaskIds = getUniqueActiveTaskIds(loadingNodes).sort();
+    const legacyLoadingNodeIds = loadingNodes
+        .filter(node => !node.activeTaskId)
+        .map(node => node.id)
+        .sort();
+    const recoveryKey = `${activeTaskIds.join(',')}|${legacyLoadingNodeIds.join(',')}`;
 
     useEffect(() => {
-        if (!loadingNodeIds) return;
-
-        const loadingNodes = loadingNodeIds.split(',').map(value => {
-            const separator = value.indexOf(':');
-            return {
-                nodeId: value.slice(0, separator),
-                taskId: value.slice(separator + 1) === 'legacy' ? undefined : value.slice(separator + 1)
-            };
-        });
+        const [serializedTaskIds = '', serializedLegacyNodeIds = ''] = recoveryKey.split('|');
+        const taskIds = serializedTaskIds ? serializedTaskIds.split(',') : [];
+        const legacyNodeIds = serializedLegacyNodeIds ? serializedLegacyNodeIds.split(',') : [];
+        if (taskIds.length === 0 && legacyNodeIds.length === 0) return;
 
         const checkAll = async () => {
             if (isCheckingRef.current) return;
             isCheckingRef.current = true;
             try {
-                const taskIds = loadingNodes
-                    .map(node => node.taskId)
-                    .filter((taskId): taskId is string => Boolean(taskId));
-
                 if (taskIds.length > 0) {
                     try {
                         const tasks = await queryGenerationTasks({ taskIds });
-                        const tasksById = new Map(tasks.map(task => [task.taskId, task]));
                         await Promise.all(tasks.map(task => applyTask(task)));
-
-                        const missingTaskNodes = loadingNodes.filter(node => node.taskId && !tasksById.has(node.taskId));
-                        await Promise.all(missingTaskNodes.map(node => checkLegacyStatus(node.nodeId)));
                     } catch (error) {
                         console.error('[Recovery] Error querying generation tasks:', error);
                     }
                 }
 
-                const legacyNodes = loadingNodes.filter(node => !node.taskId);
-                await Promise.all(legacyNodes.map(node => checkLegacyStatus(node.nodeId)));
+                await Promise.all(legacyNodeIds.map(nodeId => checkLegacyStatus(nodeId)));
             } finally {
                 isCheckingRef.current = false;
             }
@@ -213,6 +207,6 @@ export const useGenerationRecovery = ({
         const interval = setInterval(() => { void checkAll(); }, TASK_POLL_INTERVAL_MS);
 
         return () => clearInterval(interval);
-    }, [loadingNodeIds, applyTask, checkLegacyStatus]); // Stable string dependency instead of nodes array
+    }, [recoveryKey, applyTask, checkLegacyStatus]); // Stable string dependency instead of nodes array
 };
 

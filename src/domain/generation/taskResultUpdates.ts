@@ -29,6 +29,31 @@ function terminalErrorUpdate(task: GenerationTask): Partial<NodeData> {
   };
 }
 
+export function getUniqueActiveTaskIds(nodes: NodeData[]): string[] {
+  return [...new Set(nodes.map(node => node.activeTaskId).filter((id): id is string => Boolean(id)))];
+}
+
+export function buildStoryTaskStartUpdates(
+  nodes: NodeData[],
+  task: GenerationTask
+): NodeUpdateMap {
+  if (task.operation !== 'generate-story-package') return {};
+  const input = asRecord(task.inputSnapshot);
+  const storyboardNodeId = typeof input.storyboardNodeId === 'string' ? input.storyboardNodeId : '';
+  const script = nodes.find(node => node.id === task.nodeId);
+  const storyboard = nodes.find(node => node.id === storyboardNodeId);
+  if (!script?.scriptData || !storyboard?.storyboardData) return {};
+  if (script.scriptData.revision !== input.scriptRevision) return {};
+  if (storyboard.storyboardData.revision !== input.storyboardRevision) return {};
+  const update = {
+    status: 'loading' as NodeData['status'],
+    activeTaskId: task.taskId,
+    errorMessage: undefined,
+    generationStartTime: new Date(task.createdAt).getTime()
+  };
+  return { [script.id]: update, [storyboard.id]: update };
+}
+
 export function buildGenerationTaskNodeUpdates(
   nodes: NodeData[],
   task: GenerationTask
