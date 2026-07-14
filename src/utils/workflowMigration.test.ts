@@ -131,7 +131,9 @@ test('migration is idempotent', () => {
 });
 
 test('story documents migrate to schema version 5 without losing unknown fields', () => {
-  const once = migrateWorkflow(fixture('workflow-script-storyboard-v4.json'));
+  const raw = fixture('workflow-script-storyboard-v4.json');
+  const once = migrateWorkflow(raw);
+  const independentlyMigrated = migrateWorkflow(raw);
   const twice = migrateWorkflow(once);
   const script = once.nodes.find(node => node.id === 'script-1');
   const storyboard = once.nodes.find(node => node.id === 'storyboard-1');
@@ -142,6 +144,7 @@ test('story documents migrate to schema version 5 without losing unknown fields'
   assert.equal(storyboard?.storyboardData?.shots[0].id, 'legacy-shot-storyboard-1-1');
   assert.equal((storyboard?.storyboardData?.shots[0] as unknown as Record<string, unknown>).futureShot, 'kept');
   assert.equal(once.edges[0].dataType, 'script');
+  assert.deepEqual(independentlyMigrated, once);
   assert.deepEqual(twice, once);
 });
 

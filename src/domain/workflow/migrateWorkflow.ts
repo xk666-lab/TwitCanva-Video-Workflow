@@ -24,6 +24,9 @@ export interface WorkflowMigrationOptions {
 
 type UnknownRecord = Record<string, unknown>;
 
+// Keep legacy document timestamps stable when the source node has no timestamp.
+const LEGACY_STORY_DOCUMENT_MIGRATION_NOW = '1970-01-01T00:00:00.000Z';
+
 function asRecord(value: unknown): UnknownRecord {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as UnknownRecord
@@ -32,6 +35,15 @@ function asRecord(value: unknown): UnknownRecord {
 
 function finiteNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function storyDocumentMigrationNow(node: NodeData): string {
+  const record = node as unknown as UnknownRecord;
+  return typeof record.createdAt === 'string'
+    ? record.createdAt
+    : typeof record.updatedAt === 'string'
+      ? record.updatedAt
+      : LEGACY_STORY_DOCUMENT_MIGRATION_NOW;
 }
 
 function cloneNode(rawNode: unknown): UnknownRecord {
@@ -92,14 +104,19 @@ function migrateNode(rawNode: unknown, index: number, warn: (message: string) =>
   } as NodeData;
 
   const takeNormalized = normalizeLegacyNodeTakes(node);
+  const now = storyDocumentMigrationNow(takeNormalized);
   if (String(takeNormalized.type) === '脚本') {
-    return { ...takeNormalized, scriptData: normalizeScriptDocument(takeNormalized.scriptData) };
+    return {
+      ...takeNormalized,
+      scriptData: normalizeScriptDocument(takeNormalized.scriptData, { now })
+    };
   }
   if (String(takeNormalized.type) === '分镜管理器') {
     return {
       ...takeNormalized,
       storyboardData: normalizeStoryboardDocument(takeNormalized.storyboardData, {
-        ownerId: String(takeNormalized.id)
+        ownerId: String(takeNormalized.id),
+        now
       })
     };
   }
