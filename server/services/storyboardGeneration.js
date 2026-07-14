@@ -45,12 +45,12 @@ export async function retryOperation(operation, maxRetries = 3, initialDelayMs =
     throw new Error('Storyboard provider retry loop ended unexpectedly');
 }
 
-async function defaultOpenAIRequest(locals, messages) {
+async function defaultOpenAIRequest(locals, messages, model = locals.OPENAI_TEXT_MODEL || 'gpt-4.1-mini') {
     return retryOperation(() => requestChatCompletion({
         messages,
         apiKey: locals.OPENAI_API_KEY,
         baseURL: locals.OPENAI_BASE_URL,
-        model: locals.OPENAI_TEXT_MODEL,
+        model,
         chatCompletionsPath: locals.OPENAI_CHAT_COMPLETIONS_PATH
     }));
 }
@@ -77,8 +77,8 @@ export async function generateStoryPackageWithConfiguredProvider({
     const selected = resolveStoryboardTextProvider(locals);
     const requestText = selected.provider === 'openai'
         ? messages => (dependencies.requestOpenAI
-            ? dependencies.requestOpenAI(messages)
-            : defaultOpenAIRequest(locals, messages))
+            ? dependencies.requestOpenAI(messages, selected.model)
+            : defaultOpenAIRequest(locals, messages, selected.model))
         : messages => (dependencies.requestGemini
             ? dependencies.requestGemini(messages)
             : defaultGeminiRequest(locals, messages));
@@ -102,7 +102,7 @@ function extractJsonText(text) {
         : raw;
 }
 
-async function requestGeminiScriptsWithReferences(locals, payload) {
+async function requestGeminiScriptsWithReferences(locals, payload, dependencies = {}) {
     const {
         story,
         characterDescriptions,
@@ -113,8 +113,9 @@ async function requestGeminiScriptsWithReferences(locals, payload) {
     const count = Number.parseInt(sceneCount, 10);
 
     // Initialize Gemini
-    const genAI = new GoogleGenerativeAI(locals.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const model = dependencies.geminiModel || new GoogleGenerativeAI(locals.GEMINI_API_KEY)
+        .getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const imageToBase64 = dependencies.resolveImageToBase64 || resolveImageToBase64;
 
     // Categorize reference images
     const refs = referenceImages || [];
@@ -226,7 +227,7 @@ Respond ONLY with valid JSON, no other text.`;
         console.log('[Storyboard] Processing reference images for scripts...');
         for (const ref of referenceImages) {
             try {
-                const fullDataUrl = await resolveImageToBase64(ref.url);
+                const fullDataUrl = await imageToBase64(ref.url);
                 if (fullDataUrl && fullDataUrl.startsWith('data:')) {
                     const matches = fullDataUrl.match(/^data:(.+);base64,(.+)$/);
                     if (matches) {
@@ -272,7 +273,7 @@ Respond ONLY with valid JSON, no other text.`;
         console.log('[Storyboard] Processing character images for scripts...');
         for (const [name, url] of Object.entries(characterImages)) {
             try {
-                const fullDataUrl = await resolveImageToBase64(url);
+                const fullDataUrl = await imageToBase64(url);
                 if (fullDataUrl && fullDataUrl.startsWith('data:')) {
                     const matches = fullDataUrl.match(/^data:(.+);base64,(.+)$/);
                     if (matches) {
@@ -331,7 +332,7 @@ export async function generateStoryboardScriptsWithConfiguredProvider({
 
     const responseText = dependencies.requestGeminiScripts
         ? await dependencies.requestGeminiScripts(payload)
-        : await requestGeminiScriptsWithReferences(locals, payload);
+        : await requestGeminiScriptsWithReferences(locals, payload, dependencies);
     const parsed = JSON.parse(extractJsonText(responseText));
     const scripts = parsed.scenes || parsed.scripts || parsed;
     if (!Array.isArray(scripts) || scripts.length === 0) {
