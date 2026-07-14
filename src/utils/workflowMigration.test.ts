@@ -149,9 +149,24 @@ test('story documents migrate to schema version 5 without losing unknown fields'
 });
 
 test('legacy storyboard groups gain normalized shots without visible node creation', () => {
-  const migrated = migrateWorkflow(fixture('legacy-storyboard-group.json'));
+  const raw = fixture('legacy-storyboard-group.json');
+  const migrated = migrateWorkflow(raw);
+  const rawNodes = raw.nodes as Array<Record<string, unknown>>;
+  const rawGroups = raw.groups as Array<Record<string, unknown>>;
+  const rawGroup = rawGroups[0];
+  const migratedGroup = migrated.groups[0] as unknown as Record<string, unknown>;
 
-  assert.equal(migrated.nodes.length, 1);
+  assert.equal(migrated.nodes.length, rawNodes.length);
+  assert.equal(migrated.edges.length, 0);
+  assert.deepEqual(
+    migrated.nodes.map(node => ({ id: node.id, x: node.x, y: node.y })),
+    rawNodes.map(node => ({ id: node.id, x: node.x, y: node.y }))
+  );
+  assert.deepEqual(migratedGroup.nodeIds, rawGroup.nodeIds);
+  for (const key of ['x', 'y', 'width', 'height', 'position', 'positionAbsolute', 'geometry']) {
+    if (key in rawGroup) assert.deepEqual(migratedGroup[key], rawGroup[key], key);
+  }
+  assert.deepEqual(migrated.viewport, raw.viewport);
   assert.equal(migrated.groups[0].storyContext?.scripts[0].id, 'legacy-shot-storyboard-group-1');
   assert.equal(migrated.groups[0].storyContext?.scripts[0].order, 0);
 });
