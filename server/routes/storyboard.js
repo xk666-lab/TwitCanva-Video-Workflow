@@ -7,109 +7,16 @@
 
 import express from 'express';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { requestChatCompletion } from '../services/openaiChat.js';
 import { generateStoryPackage } from '../services/storyboardText.js';
+import {
+    createOpenAIStoryboardRequester,
+    generateStoryPackageWithConfiguredProvider,
+    normalizeTextReferences,
+    retryOperation
+} from '../services/storyboardGeneration.js';
 import { generateOpenAIImage } from '../services/openai.js';
 
 const router = express.Router();
-
-/**
- * Helper to retry async operations with exponential backoff
- */
-async function retryOperation(operation, maxRetries = 3, initialDelayMs = 2000) {
-    let delay = initialDelayMs;
-    for (let i = 0; i < maxRetries; i++) {
-        try {
-            return await operation();
-        } catch (error) {
-            const isLastAttempt = i === maxRetries - 1;
-            console.warn(`[Storyboard] API Call Failed (Attempt ${i + 1}/${maxRetries}):`, error.message);
-
-            if (isLastAttempt) throw error;
-
-            console.log(`[Storyboard] Retrying in ${delay}ms...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            delay *= 2; // Exponential backoff
-        }
-    }
-}
-
-function normalizeTextReferences({ characterDescriptions = [], referenceImages = [] }) {
-    if (Array.isArray(characterDescriptions) && characterDescriptions.length > 0) {
-        return characterDescriptions.map(character => ({
-            name: character.name,
-            description: [
-                character.description,
-                character.category ? `category: ${character.category}` : ''
-            ].filter(Boolean).join('; ') || 'Reference asset'
-        }));
-    }
-
-    if (Array.isArray(referenceImages) && referenceImages.length > 0) {
-        return referenceImages.map(reference => ({
-            name: reference.name,
-            description: `${reference.category || 'Reference'} visual asset selected from the canvas library`
-        }));
-    }
-
-    return [];
-}
-
-function createOpenAIStoryboardRequester(req) {
-    const {
-        OPENAI_API_KEY,
-        OPENAI_BASE_URL,
-        OPENAI_TEXT_MODEL,
-        OPENAI_CHAT_COMPLETIONS_PATH
-    } = req.app.locals;
-
-    if (!OPENAI_API_KEY) return null;
-
-    return (messages) => requestChatCompletion({
-        messages,
-        apiKey: OPENAI_API_KEY,
-        baseURL: OPENAI_BASE_URL,
-        model: OPENAI_TEXT_MODEL,
-        chatCompletionsPath: OPENAI_CHAT_COMPLETIONS_PATH
-    });
-}
-
-function createGeminiStoryboardRequester(req) {
-    const { GEMINI_API_KEY } = req.app.locals;
-    if (!GEMINI_API_KEY) return null;
-
-    return async (messages) => {
-        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-        const prompt = messages
-            .map(message => `${message.role.toUpperCase()}:\n${message.content}`)
-            .join('\n\n');
-        const result = await retryOperation(() => model.generateContent(prompt));
-        return result.response.text();
-    };
-}
-
-async function generateStoryPackageWithConfiguredProvider(req, payload) {
-    const openAIRequester = createOpenAIStoryboardRequester(req);
-    if (openAIRequester) {
-        const packageResult = await generateStoryPackage({
-            ...payload,
-            requestText: openAIRequester
-        });
-        return { ...packageResult, provider: 'openai' };
-    }
-
-    const geminiRequester = createGeminiStoryboardRequester(req);
-    if (geminiRequester) {
-        const packageResult = await generateStoryPackage({
-            ...payload,
-            requestText: geminiRequester
-        });
-        return { ...packageResult, provider: 'gemini' };
-    }
-
-    throw new Error('No text generation API key configured. Add OPENAI_API_KEY or GEMINI_API_KEY to .env');
-}
 
 // ============================================================================
 // SCRIPT GENERATION
@@ -146,11 +53,15 @@ router.post('/generate-story-package', async (req, res) => {
 
         console.log(`[Storyboard] Generating story package with ${count} scenes`);
 
-        const packageResult = await generateStoryPackageWithConfiguredProvider(req, {
-            story,
-            sceneCount: count,
-            tone,
-            characterDescriptions: normalizeTextReferences({ characterDescriptions, referenceImages })
+        const packageResult = await generateStoryPackageWithConfiguredProvider({
+            locals: req.app.locals,
+            payload: {
+                story,
+                sceneCount: count,
+                tone,
+                characterDescriptions,
+                referenceImages
+            }
         });
 
         return res.json(packageResult);
@@ -188,7 +99,7 @@ router.post('/generate-scripts', async (req, res) => {
 
         console.log(`[Storyboard] Generating ${count} scene scripts`);
 
-        const openAIRequester = createOpenAIStoryboardRequester(req);
+        const openAIRequester = createOpenAIStoryboardRequester(req.app.locals);
         if (openAIRequester) {
             const packageResult = await generateStoryPackage({
                 story,
@@ -465,7 +376,7 @@ router.post('/brainstorm-story', async (req, res) => {
         const { GEMINI_API_KEY } = req.app.locals;
 
         if (!GEMINI_API_KEY) {
-            const openAIRequester = createOpenAIStoryboardRequester(req);
+            const openAIRequester = createOpenAIStoryboardRequester(req.app.locals);
             if (openAIRequester) {
                 const textReferences = normalizeTextReferences({ characterDescriptions, referenceImages });
                 const characterContext = textReferences.length > 0
@@ -605,7 +516,7 @@ router.post('/optimize-story', async (req, res) => {
         }
 
         if (!GEMINI_API_KEY) {
-            const openAIRequester = createOpenAIStoryboardRequester(req);
+            const openAIRequester = createOpenAIStoryboardRequester(req.app.locals);
             if (openAIRequester) {
                 const optimizedStory = await openAIRequester([
                     {
