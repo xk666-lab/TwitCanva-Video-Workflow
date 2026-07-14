@@ -1,4 +1,28 @@
 import type { MediaTake } from '../../types.ts';
+import type {
+  ScriptDocument,
+  StoryboardDocument
+} from '../storyboard/storyboardTypes.ts';
+
+export interface MediaGenerationTaskOutput {
+  kind?: 'media';
+  resultUrl: string;
+  take?: MediaTake;
+}
+
+export interface StoryPackageGenerationTaskOutput {
+  kind: 'story-package';
+  resultUrl?: never;
+  take?: never;
+  scriptRevision: number;
+  storyboardRevision: number;
+  scriptData: ScriptDocument;
+  storyboardData: StoryboardDocument;
+}
+
+export type GenerationTaskOutput =
+  | MediaGenerationTaskOutput
+  | StoryPackageGenerationTaskOutput;
 
 export type GenerationTaskStatus =
   | 'draft'
@@ -23,10 +47,7 @@ export interface GenerationTask {
   inputHash: string;
   parameters: Record<string, unknown>;
   providerTaskId?: string;
-  output?: {
-    resultUrl: string;
-    take?: MediaTake;
-  };
+  output?: GenerationTaskOutput;
   error?: {
     code?: string;
     message: string;

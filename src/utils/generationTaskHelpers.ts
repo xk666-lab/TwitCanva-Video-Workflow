@@ -12,7 +12,11 @@ export function buildGenerationTaskNodeUpdate(
 ): Partial<NodeData> {
   if (!canApplyGenerationTaskResult(node, task)) return {};
 
-  if (task.status === 'succeeded' && task.output?.resultUrl) {
+  if (
+    task.status === 'succeeded'
+    && task.output?.kind !== 'story-package'
+    && task.output?.resultUrl
+  ) {
     return {
       ...buildGenerationSuccessUpdate(node, task.output),
       activeTaskId: undefined,

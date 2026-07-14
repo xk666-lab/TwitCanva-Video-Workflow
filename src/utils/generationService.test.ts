@@ -163,3 +163,50 @@ test('submitImageGeneration returns after task creation without starting a per-n
   assert.equal(task.taskId, 'task-submit-only');
   assert.equal(fetchCount, 1);
 });
+
+test('submitStoryPackageGeneration uses the shared task endpoint without polling', async t => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  let requestBody: Record<string, unknown> | undefined;
+  globalThis.fetch = async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body));
+    return jsonResponse({
+      task: {
+        schemaVersion: 1,
+        taskId: 'story-task',
+        workflowId: 'workflow-1',
+        nodeId: 'script-1',
+        operation: 'generate-story-package',
+        provider: 'openai',
+        model: 'gpt-4.1-mini',
+        status: 'queued',
+        progress: 0,
+        inputSnapshot: requestBody?.inputSnapshot,
+        inputHash: 'a'.repeat(64),
+        parameters: {},
+        attempt: 1,
+        createdAt: '2026-07-14T00:00:00.000Z',
+        updatedAt: '2026-07-14T00:00:00.000Z'
+      }
+    }, 202);
+  };
+
+  const { submitStoryPackageGeneration } = await import('../services/generationService.ts');
+  const task = await submitStoryPackageGeneration({
+    nodeId: 'script-1',
+    scriptNodeId: 'script-1',
+    storyboardNodeId: 'storyboard-1',
+    scriptRevision: 0,
+    storyboardRevision: 0,
+    generationMode: 'story-package',
+    sourceText: 'A paper moon',
+    sceneCount: 3,
+    referenceAssets: [],
+    selectedImageModel: 'gpt-image-2',
+    scriptData: {} as never,
+    storyboardData: {} as never
+  }, { workflowId: 'workflow-1' });
+
+  assert.equal(task.taskId, 'story-task');
+  assert.equal(requestBody?.operation, 'generate-story-package');
+});

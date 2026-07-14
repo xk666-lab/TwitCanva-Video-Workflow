@@ -99,3 +99,21 @@ export interface StoryboardSessionSnapshot {
   selectedImageModel: string;
   compositeImageUrl: string | null;
 }
+
+export type StoryPackageGenerationMode = 'scripts' | 'story-package';
+
+export interface GenerateStoryPackageTaskInput {
+  nodeId: string;
+  scriptNodeId: string;
+  storyboardNodeId: string;
+  scriptRevision: number;
+  storyboardRevision: number;
+  generationMode: StoryPackageGenerationMode;
+  sourceText: string;
+  sceneCount: number;
+  tone?: string;
+  referenceAssets: StoryReferenceAsset[];
+  selectedImageModel: string;
+  scriptData: ScriptDocument;
+  storyboardData: StoryboardDocument;
+}

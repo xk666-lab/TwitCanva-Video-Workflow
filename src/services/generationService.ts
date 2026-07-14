@@ -8,6 +8,7 @@
  */
 
 import type { GenerationTask } from '../domain/generation/generationTask.ts';
+import type { GenerateStoryPackageTaskInput } from '../domain/storyboard/storyboardTypes.ts';
 import type { MediaTake } from '../types';
 import { apiGet, apiPost } from './apiClient.ts';
 
@@ -124,8 +125,8 @@ export const waitForGenerationTask = async (
 };
 
 export async function submitGenerationTask(
-  operation: 'generate-image' | 'generate-video' | 'generate-local-image',
-  inputSnapshot: GenerateImageParams | GenerateVideoParams | Record<string, unknown>,
+  operation: 'generate-image' | 'generate-video' | 'generate-local-image' | 'generate-story-package',
+  inputSnapshot: GenerateImageParams | GenerateVideoParams | GenerateStoryPackageTaskInput | Record<string, unknown>,
   options: GenerationRequestOptions = {}
 ): Promise<GenerationTask> {
   const nodeId = typeof inputSnapshot.nodeId === 'string' ? inputSnapshot.nodeId : undefined;
@@ -156,6 +157,11 @@ export const submitVideoGeneration = (
   params: GenerateVideoParams,
   options: GenerationRequestOptions = {}
 ): Promise<GenerationTask> => submitGenerationTask('generate-video', params, options);
+
+export const submitStoryPackageGeneration = (
+  params: GenerateStoryPackageTaskInput,
+  options: GenerationRequestOptions = {}
+): Promise<GenerationTask> => submitGenerationTask('generate-story-package', params, options);
 
 /**
  * Generates an image by calling the backend API
