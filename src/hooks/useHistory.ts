@@ -7,6 +7,10 @@
 
 import { useState, useCallback } from 'react';
 
+export function areCanvasHistoryStatesEqual(left: unknown, right: unknown): boolean {
+    return JSON.stringify(left) === JSON.stringify(right);
+}
+
 export const useHistory = <T>(initialState: T, maxHistorySize: number = 50) => {
     // ============================================================================
     // STATE

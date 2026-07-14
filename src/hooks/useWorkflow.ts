@@ -8,7 +8,7 @@
 import React, { useState, useCallback, Dispatch, SetStateAction } from 'react';
 import { NodeData, NodeGroup, Viewport } from '../types';
 import { apiGet, apiPost } from '../services/apiClient';
-import { createWorkflowData } from '../domain/workflow/workflowSchema';
+import { createWorkflowData, type WorkflowData } from '../domain/workflow/workflowSchema';
 import { migrateWorkflow } from '../domain/workflow/migrateWorkflow';
 import type { CanvasEdge } from '../domain/graph/graphTypes';
 import { syncLegacyStoryboardContexts } from '../domain/storyboard/storyboardGraph';
@@ -28,6 +28,7 @@ interface UseWorkflowOptions {
     setCanvasTitle: (title: string) => void;
     setEditingTitleValue: (value: string) => void;
     onPanelOpen?: () => void;
+    onWorkflowLoaded?: (workflow: WorkflowData) => void;
 }
 
 export const useWorkflow = ({
@@ -43,7 +44,8 @@ export const useWorkflow = ({
     setSelectedNodeIds,
     setCanvasTitle,
     setEditingTitleValue,
-    onPanelOpen
+    onPanelOpen,
+    onWorkflowLoaded
 }: UseWorkflowOptions) => {
     const [workflowId, setWorkflowId] = useState<string | null>(null);
     const [isWorkflowPanelOpen, setIsWorkflowPanelOpen] = useState(false);
@@ -87,6 +89,7 @@ export const useWorkflow = ({
             replaceGraph(workflow.nodes, workflow.edges);
             setGroups(workflow.groups || []);
             setTimeline(workflow.timeline);
+            onWorkflowLoaded?.(workflow);
             setSelectedNodeIds([]);
             setIsWorkflowPanelOpen(false);
             console.log(isPublic ? 'Public workflow loaded:' : 'Workflow loaded:', targetWorkflowId);
@@ -99,7 +102,7 @@ export const useWorkflow = ({
             console.error('Failed to load workflow:', error);
         }
         return null;
-    }, [replaceGraph, setGroups, setTimeline, setSelectedNodeIds, setCanvasTitle, setEditingTitleValue]);
+    }, [onWorkflowLoaded, replaceGraph, setGroups, setTimeline, setSelectedNodeIds, setCanvasTitle, setEditingTitleValue]);
 
     const handleWorkflowsClick = useCallback((e: React.MouseEvent) => {
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();

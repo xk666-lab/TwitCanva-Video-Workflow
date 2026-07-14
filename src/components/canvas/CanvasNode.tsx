@@ -23,6 +23,7 @@ interface CanvasNodeProps {
   onOpenStoryNode?: (nodeId: string) => void;
   onCancelStoryTask?: (nodeId: string) => void;
   onRetryStoryTask?: (nodeId: string) => void;
+  onAddStoryboardToTimeline?: (nodeId: string) => { valid: boolean; message?: string };
   onAddNext: (id: string, type: 'left' | 'right') => void;
   selected: boolean;
   showControls?: boolean; // Only show controls when single node is selected (not in group selection)
@@ -68,6 +69,7 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
   onOpenStoryNode,
   onCancelStoryTask,
   onRetryStoryTask,
+  onAddStoryboardToTimeline,
   onAddNext,
   selected,
   showControls = true, // Default to true for backward compatibility
@@ -961,6 +963,7 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
             onOpenStoryNode={onOpenStoryNode}
             onCancelStoryTask={onCancelStoryTask}
             onRetryStoryTask={onRetryStoryTask}
+            onAddStoryboardToTimeline={onAddStoryboardToTimeline}
           />
         </div>
 

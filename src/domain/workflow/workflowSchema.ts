@@ -3,7 +3,7 @@ import type { CanvasEdge } from '../graph/graphTypes';
 import { createEmptyTimelineDocument, normalizeTimelineDocument } from '../timeline/timelineDocument.ts';
 import type { TimelineDocument } from '../timeline/timelineTypes.ts';
 
-export const CURRENT_WORKFLOW_SCHEMA_VERSION = 7;
+export const CURRENT_WORKFLOW_SCHEMA_VERSION = 8;
 export const LEGACY_WORKFLOW_SCHEMA_VERSION = 1;
 
 export interface WorkflowData {

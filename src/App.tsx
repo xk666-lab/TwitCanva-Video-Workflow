@@ -21,7 +21,7 @@ import { useGeneration } from './hooks/useGeneration';
 import { useImageEditGeneration } from './hooks/useImageEditGeneration';
 import { useSelectionBox } from './hooks/useSelectionBox';
 import { useGroupManagement } from './hooks/useGroupManagement';
-import { useHistory } from './hooks/useHistory';
+import { areCanvasHistoryStatesEqual, useHistory } from './hooks/useHistory';
 import { useCanvasTitle } from './hooks/useCanvasTitle';
 import { useWorkflow } from './hooks/useWorkflow';
 import { useWorkflowTemplates } from './hooks/useWorkflowTemplates';
@@ -40,6 +40,7 @@ import { useTimeline } from './hooks/useTimeline';
 import { createDefaultNodeData } from './domain/nodes/nodeRegistry';
 import { createEmptyTimelineDocument } from './domain/timeline/timelineDocument';
 import type { TimelineDocument } from './domain/timeline/timelineTypes';
+import type { WorkflowData } from './domain/workflow/workflowSchema';
 import { extractVideoLastFrame } from './utils/videoHelpers';
 import { SelectionBoundingBox } from './components/canvas/SelectionBoundingBox';
 import { WorkflowPanel } from './components/WorkflowPanel';
@@ -205,6 +206,7 @@ export default function App() {
     closeTimeline,
     toggleTimeline,
     addNodeResultToTimeline,
+    addStoryboardVideosToTimeline,
     moveClip: moveTimelineClip,
     removeClip: removeTimelineClip
   } = useTimeline({ nodes, timeline, setTimeline });
@@ -215,9 +217,19 @@ export default function App() {
     undo,
     redo,
     pushHistory,
+    reset: resetHistory,
     canUndo,
     canRedo
   } = useHistory({ nodes, edges, groups, timeline }, 50);
+
+  const handleWorkflowHistoryReset = React.useCallback((workflow: WorkflowData) => {
+    resetHistory({
+      nodes: workflow.nodes,
+      edges: workflow.edges,
+      groups: workflow.groups,
+      timeline: workflow.timeline
+    });
+  }, [resetHistory]);
 
   // Workflow management
   const {
@@ -242,6 +254,7 @@ export default function App() {
     setSelectedNodeIds,
     setCanvasTitle,
     setEditingTitleValue,
+    onWorkflowLoaded: handleWorkflowHistoryReset,
     onPanelOpen: () => {
       closeHistoryPanel();
       closeAssetLibrary();
@@ -978,7 +991,7 @@ export default function App() {
       return;
     }
 
-    if (historyState.nodes !== nodes || historyState.edges !== edges || historyState.groups !== groups || historyState.timeline !== timeline) {
+    if (!areCanvasHistoryStatesEqual(historyState, { nodes, edges, groups, timeline })) {
       isApplyingHistory.current = true;
       replaceGraph(historyState.nodes, historyState.edges);
       setGroups(historyState.groups);
@@ -1325,6 +1338,7 @@ export default function App() {
                 onOpenStoryNode={storyboardGenerator.openNode}
                 onCancelStoryTask={storyboardGenerator.cancelTaskForNode}
                 onRetryStoryTask={storyboardGenerator.retryTaskForNode}
+                onAddStoryboardToTimeline={addStoryboardVideosToTimeline}
                 onAddNext={handleAddNext}
                 selected={selectedNodeIds.includes(node.id)}
                 showControls={selectedNodeIds.length === 1 && selectedNodeIds.includes(node.id)}

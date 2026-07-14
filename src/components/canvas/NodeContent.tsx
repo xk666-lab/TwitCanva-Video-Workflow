@@ -39,6 +39,7 @@ interface NodeContentProps {
     onOpenStoryNode?: (nodeId: string) => void;
     onCancelStoryTask?: (nodeId: string) => void;
     onRetryStoryTask?: (nodeId: string) => void;
+    onAddStoryboardToTimeline?: (nodeId: string) => { valid: boolean; message?: string };
 }
 
 export const NodeContent: React.FC<NodeContentProps> = ({
@@ -63,7 +64,8 @@ export const NodeContent: React.FC<NodeContentProps> = ({
     onPostToX,
     onOpenStoryNode,
     onCancelStoryTask,
-    onRetryStoryTask
+    onRetryStoryTask,
+    onAddStoryboardToTimeline
 }) => {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const audioInputRef = useRef<HTMLInputElement>(null);
@@ -151,6 +153,7 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                 onOpen={onOpenStoryNode || (() => undefined)}
                 onCancel={onCancelStoryTask || (() => undefined)}
                 onRetry={onRetryStoryTask || (() => undefined)}
+                onAddToTimeline={onAddStoryboardToTimeline}
             />
         );
     }

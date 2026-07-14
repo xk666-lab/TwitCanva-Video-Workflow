@@ -7,6 +7,7 @@ import {
   createWorkflowData
 } from '../domain/workflow/workflowSchema.ts';
 import { migrateWorkflow } from '../domain/workflow/migrateWorkflow.ts';
+import { CURRENT_TIMELINE_SCHEMA_VERSION } from '../domain/timeline/timelineTypes.ts';
 
 function fixture(name: string): Record<string, unknown> {
   const url = new URL(`../../test/fixtures/workflows/${name}`, import.meta.url);
@@ -26,12 +27,57 @@ test('new workflow payloads use the current schema version', () => {
   assert.equal(workflow.schemaVersion, CURRENT_WORKFLOW_SCHEMA_VERSION);
   assert.equal(workflow.title, 'New Workflow');
   assert.deepEqual((workflow as unknown as Record<string, unknown>).timeline, {
-    schemaVersion: 1,
+    schemaVersion: 2,
     tracks: [
       { id: 'video-main', kind: 'video', name: '视频轨', clips: [] },
       { id: 'audio-main', kind: 'audio', name: '音频轨', clips: [] }
     ]
   });
+});
+
+test('workflow migration upgrades timeline assembly metadata without losing unknown fields', () => {
+  const raw = {
+    schemaVersion: 7,
+    id: 'pre-assembly-workflow',
+    title: 'Pre assembly',
+    nodes: [],
+    edges: [],
+    groups: [],
+    viewport: { x: 0, y: 0, zoom: 1 },
+    timeline: {
+      schemaVersion: 1,
+      futureTimelineField: { keep: true },
+      tracks: [{
+        id: 'video-main',
+        kind: 'video',
+        name: 'Video',
+        clips: [{
+          id: 'clip-1',
+          mediaType: 'video',
+          sourceNodeId: 'video-1',
+          sourceTakeId: 'take-1',
+          sourceStoryboardNodeId: 'storyboard-1',
+          sourceStoryboardShotId: 'shot-1',
+          sourceUrl: '/library/videos/one.mp4',
+          order: 0,
+          futureClipField: 'keep-me'
+        }]
+      }]
+    }
+  };
+  const snapshot = structuredClone(raw);
+  const migrated = migrateWorkflow(raw, { warn: () => undefined });
+
+  assert.equal(CURRENT_WORKFLOW_SCHEMA_VERSION, 8);
+  assert.equal(CURRENT_TIMELINE_SCHEMA_VERSION, 2);
+  assert.equal(migrated.schemaVersion, 8);
+  assert.equal(migrated.timeline.schemaVersion, 2);
+  assert.deepEqual(migrated.timeline.futureTimelineField, { keep: true });
+  assert.equal(migrated.timeline.tracks[0].clips[0].sourceStoryboardNodeId, 'storyboard-1');
+  assert.equal(migrated.timeline.tracks[0].clips[0].sourceStoryboardShotId, 'shot-1');
+  assert.equal((migrated.timeline.tracks[0].clips[0] as Record<string, unknown>).futureClipField, 'keep-me');
+  assert.deepEqual(raw, snapshot);
+  assert.deepEqual(migrateWorkflow(migrated, { warn: () => undefined }), migrated);
 });
 
 test('workflow migration initializes and normalizes a separate timeline without losing unknown fields', () => {
@@ -65,7 +111,7 @@ test('workflow migration initializes and normalizes a separate timeline without 
   const migrated = migrateWorkflow(raw, { warn: () => undefined }) as unknown as Record<string, any>;
 
   assert.deepEqual(migrated.timeline, {
-    schemaVersion: 1,
+    schemaVersion: 2,
     futureTimelineField: 'keep-me',
     tracks: [{
       id: 'audio-main',

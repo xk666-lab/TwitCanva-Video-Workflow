@@ -1,4 +1,4 @@
-export const CURRENT_TIMELINE_SCHEMA_VERSION = 1;
+export const CURRENT_TIMELINE_SCHEMA_VERSION = 2;
 
 export type TimelineMediaType = 'video' | 'audio';
 
@@ -7,6 +7,8 @@ export interface TimelineClip {
   mediaType: TimelineMediaType;
   sourceNodeId: string;
   sourceTakeId?: string;
+  sourceStoryboardNodeId?: string;
+  sourceStoryboardShotId?: string;
   sourceUrl: string;
   label?: string;
   order: number;
@@ -32,6 +34,8 @@ export interface TimelineClipInput {
   mediaType: TimelineMediaType;
   sourceNodeId: string;
   sourceTakeId?: string;
+  sourceStoryboardNodeId?: string;
+  sourceStoryboardShotId?: string;
   sourceUrl: string;
   label?: string;
 }

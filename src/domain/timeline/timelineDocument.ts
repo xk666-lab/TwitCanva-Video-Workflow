@@ -6,8 +6,21 @@ import {
   type TimelineMediaType,
   type TimelineTrack
 } from './timelineTypes.ts';
+import type { NodeData } from '../../types.ts';
 
 type UnknownRecord = Record<string, unknown>;
+
+const STORYBOARD_NODE_TYPE = '\u5206\u955c\u7ba1\u7406\u5668';
+const VIDEO_NODE_TYPE = '\u89c6\u9891';
+
+export interface StoryboardTimelineAppendResult {
+  timeline: TimelineDocument;
+  addedCount: number;
+  duplicateCount: number;
+  pendingCount: number;
+  failedCount: number;
+  missingCount: number;
+}
 
 const DEFAULT_TRACKS: Array<Pick<TimelineTrack, 'id' | 'kind' | 'name'>> = [
   { id: 'video-main', kind: 'video', name: '视频轨' },
@@ -45,6 +58,12 @@ function normalizeClip(
     mediaType: mediaType(clip.mediaType, trackKind),
     sourceNodeId: typeof clip.sourceNodeId === 'string' ? clip.sourceNodeId : '',
     ...(typeof clip.sourceTakeId === 'string' && clip.sourceTakeId ? { sourceTakeId: clip.sourceTakeId } : {}),
+    ...(typeof clip.sourceStoryboardNodeId === 'string' && clip.sourceStoryboardNodeId
+      ? { sourceStoryboardNodeId: clip.sourceStoryboardNodeId }
+      : {}),
+    ...(typeof clip.sourceStoryboardShotId === 'string' && clip.sourceStoryboardShotId
+      ? { sourceStoryboardShotId: clip.sourceStoryboardShotId }
+      : {}),
     sourceUrl: typeof clip.sourceUrl === 'string' ? clip.sourceUrl : '',
     ...(typeof clip.label === 'string' && clip.label ? { label: clip.label } : {}),
     order: finiteNumber(clip.order, clipIndex)
@@ -116,6 +135,97 @@ export function appendTimelineClip(
         : track)
       : [...timeline.tracks, { ...fallbackTrack, id: trackId, clips: [nextClip] }]
   };
+}
+
+function heroTakeId(node: NodeData): string | undefined {
+  const take = node.takes?.find(candidate => candidate.id === node.heroTakeId)
+    || node.takes?.find(candidate => candidate.isHero);
+  return take?.id;
+}
+
+function clipMatchesStoryboardVideo(
+  clip: TimelineClip,
+  sourceNodeId: string,
+  sourceTakeId: string | undefined,
+  sourceUrl: string
+): boolean {
+  if (clip.sourceNodeId !== sourceNodeId) return false;
+  if (sourceTakeId) return clip.sourceTakeId === sourceTakeId;
+  return !clip.sourceTakeId && clip.sourceUrl === sourceUrl;
+}
+
+export function appendStoryboardVideosToTimeline(
+  document: TimelineDocument,
+  options: {
+    storyboardNodeId: string;
+    nodes: NodeData[];
+    idFactory?: () => string;
+  }
+): StoryboardTimelineAppendResult {
+  const timeline = normalizeTimelineDocument(document);
+  const storyboardNode = options.nodes.find(node => node.id === options.storyboardNodeId);
+  const idFactory = options.idFactory || (() => crypto.randomUUID());
+  const result: StoryboardTimelineAppendResult = {
+    timeline,
+    addedCount: 0,
+    duplicateCount: 0,
+    pendingCount: 0,
+    failedCount: 0,
+    missingCount: 0
+  };
+
+  if (!storyboardNode || String(storyboardNode.type) !== STORYBOARD_NODE_TYPE || !storyboardNode.storyboardData) {
+    return { ...result, missingCount: 1 };
+  }
+
+  const nodesById = new Map(options.nodes.map(node => [node.id, node]));
+  const orderedShots = storyboardNode.storyboardData.shots
+    .map((shot, index) => ({ shot, index }))
+    .sort((left, right) => left.shot.order - right.shot.order || left.index - right.index);
+  let nextTimeline = timeline;
+
+  for (const { shot } of orderedShots) {
+    if (!shot.videoNodeId) {
+      result.missingCount += 1;
+      continue;
+    }
+
+    const videoNode = nodesById.get(shot.videoNodeId);
+    if (!videoNode || String(videoNode.type) !== VIDEO_NODE_TYPE) {
+      result.missingCount += 1;
+      continue;
+    }
+    if (!videoNode.resultUrl) {
+      if (videoNode.status === 'error') result.failedCount += 1;
+      else result.pendingCount += 1;
+      continue;
+    }
+
+    const sourceTakeId = heroTakeId(videoNode);
+    const existingVideoClips = nextTimeline.tracks
+      .filter(track => track.kind === 'video')
+      .flatMap(track => track.clips);
+    if (existingVideoClips.some(clip =>
+      clipMatchesStoryboardVideo(clip, videoNode.id, sourceTakeId, videoNode.resultUrl!)
+    )) {
+      result.duplicateCount += 1;
+      continue;
+    }
+
+    nextTimeline = appendTimelineClip(nextTimeline, {
+      id: idFactory(),
+      mediaType: 'video',
+      sourceNodeId: videoNode.id,
+      sourceTakeId,
+      sourceStoryboardNodeId: storyboardNode.id,
+      sourceStoryboardShotId: shot.id,
+      sourceUrl: videoNode.resultUrl,
+      label: videoNode.title || shot.description || `Shot ${shot.sceneNumber}`
+    });
+    result.addedCount += 1;
+  }
+
+  return { ...result, timeline: nextTimeline };
 }
 
 export function removeTimelineClip(document: TimelineDocument, clipId: string): TimelineDocument {
