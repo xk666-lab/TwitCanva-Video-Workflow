@@ -9,7 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import generationRoutes, {
-    executeGenerationTask,
+    createGenerationTaskExecutor,
     recoverGenerationTaskOutput
 } from './routes/generation.js';
 import twitterRoutes from './routes/twitter.js';
@@ -159,7 +159,7 @@ app.locals.ROOT_DIR = path.join(__dirname, '..');
 const generationTaskManager = createGenerationTaskManager({
     tasksDir: TASKS_DIR,
     concurrency: Number(process.env.GENERATION_CONCURRENCY) || 2,
-    executor: task => executeGenerationTask(task, app.locals),
+    executor: createGenerationTaskExecutor(app.locals),
     recoverInterruptedTask: task => recoverGenerationTaskOutput(task, app.locals)
 });
 app.locals.GENERATION_TASK_MANAGER = generationTaskManager;

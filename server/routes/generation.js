@@ -778,7 +778,11 @@ async function executeVideoGeneration(inputSnapshot, locals) {
         return { resultUrl: saved.url, take };
 }
 
-export async function executeGenerationTask(task, locals) {
+export function createGenerationTaskExecutor(locals, dependencies = {}) {
+    return task => executeGenerationTask(task, locals, dependencies);
+}
+
+export async function executeGenerationTask(task, locals, dependencies = {}) {
     if (task.operation === 'generate-story-package') {
         const payload = {
             story: task.inputSnapshot.sourceText,
@@ -787,9 +791,13 @@ export async function executeGenerationTask(task, locals) {
             characterDescriptions: task.inputSnapshot.referenceAssets,
             referenceImages: task.inputSnapshot.referenceAssets
         };
+        const generateStoryPackage = dependencies.generateStoryPackageWithConfiguredProvider
+            || generateStoryPackageWithConfiguredProvider;
+        const generateStoryboardScripts = dependencies.generateStoryboardScriptsWithConfiguredProvider
+            || generateStoryboardScriptsWithConfiguredProvider;
         const result = task.inputSnapshot.generationMode === 'scripts'
-            ? await generateStoryboardScriptsWithConfiguredProvider({ locals, payload })
-            : await generateStoryPackageWithConfiguredProvider({ locals, payload });
+            ? await generateStoryboardScripts({ locals, payload })
+            : await generateStoryPackage({ locals, payload });
         return buildStoryPackageTaskOutput(task, result);
     }
     if (task.operation === 'generate-image') {

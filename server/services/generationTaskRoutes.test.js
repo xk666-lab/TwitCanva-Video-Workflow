@@ -5,7 +5,15 @@ import path from 'node:path';
 import test from 'node:test';
 
 import express from 'express';
-import generationRoutes, { recoverGenerationTaskOutput } from '../routes/generation.js';
+import generationRoutes, {
+    createGenerationTaskExecutor,
+    recoverGenerationTaskOutput
+} from '../routes/generation.js';
+import { createStoryboardRoutes } from '../routes/storyboard.js';
+import {
+    GenerationTaskStatus,
+    createGenerationTaskManager
+} from './generationTasks.js';
 
 function createTask(overrides = {}) {
     const timestamp = '2026-01-01T00:00:00.000Z';
@@ -48,6 +56,49 @@ async function startTestServer(manager, libraryDir) {
     return {
         baseUrl: `http://127.0.0.1:${address.port}`,
         close: () => new Promise(resolve => server.close(resolve))
+    };
+}
+
+async function waitForTaskStatus(manager, taskId, expectedStatus, timeoutMs = 2000) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+        const task = manager.getTask(taskId);
+        if (task?.status === expectedStatus) return task;
+        await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.fail(`Task ${taskId} did not reach ${expectedStatus}`);
+}
+
+function createStoryPackageSnapshot(overrides = {}) {
+    return {
+        nodeId: 'script-1',
+        scriptNodeId: 'script-1',
+        storyboardNodeId: 'storyboard-1',
+        sourceText: 'A paper moon',
+        sceneCount: 1,
+        generationMode: 'story-package',
+        scriptRevision: 2,
+        storyboardRevision: 4,
+        referenceAssets: [],
+        selectedImageModel: 'gpt-image-2',
+        scriptData: {
+            schemaVersion: 1,
+            title: 'Paper Moon',
+            sourceText: 'A paper moon',
+            revision: 2
+        },
+        storyboardData: {
+            schemaVersion: 1,
+            sourceScriptNodeId: 'script-1',
+            selectedImageModel: 'gpt-image-2',
+            revision: 4,
+            shots: [{
+                id: 'stable-shot',
+                imageNodeId: 'image-1',
+                revision: 3
+            }]
+        },
+        ...overrides
     };
 }
 
@@ -412,4 +463,229 @@ test('POST generation-tasks accepts story-package and derives the configured tex
     assert.equal(submission.provider, 'openai');
     assert.equal(submission.model, 'gpt-4.1-mini');
     assert.equal(submission.operation, 'generate-story-package');
+});
+
+test('story-package tasks run through the registered executor without network calls', async t => {
+    const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), 'twitcanva-story-task-executor-'));
+    t.after(() => fs.rmSync(tasksDir, { recursive: true, force: true }));
+    let providerCalls = 0;
+    const manager = createGenerationTaskManager({
+        tasksDir,
+        concurrency: 1,
+        executor: createGenerationTaskExecutor({}, {
+            generateStoryPackageWithConfiguredProvider: async ({ payload }) => {
+                providerCalls += 1;
+                assert.equal(payload.story, 'A paper moon');
+                return {
+                    story: 'A polished paper moon story',
+                    styleAnchor: 'paper craft',
+                    characterDNA: { Moon: 'folded parchment' },
+                    scripts: [{
+                        sceneNumber: 1,
+                        description: 'The paper moon unfolds',
+                        cameraAngle: 'Wide shot',
+                        cameraMovement: 'Push in',
+                        lighting: 'Blue hour',
+                        mood: 'Wonder'
+                    }]
+                };
+            }
+        })
+    });
+    await manager.initialize();
+
+    const submitted = await manager.submitTask({
+        workflowId: 'workflow-1',
+        nodeId: 'script-1',
+        operation: 'generate-story-package',
+        provider: 'openai',
+        model: 'gpt-4.1-mini',
+        inputSnapshot: createStoryPackageSnapshot(),
+        parameters: { sceneCount: 1, generationMode: 'story-package' }
+    });
+    const task = await waitForTaskStatus(manager, submitted.task.taskId, GenerationTaskStatus.SUCCEEDED);
+
+    assert.equal(providerCalls, 1);
+    assert.equal(task.provider, 'openai');
+    assert.equal(task.model, 'gpt-4.1-mini');
+    assert.equal(task.output.kind, 'story-package');
+    assert.equal(task.output.scriptRevision, 2);
+    assert.equal(task.output.storyboardRevision, 4);
+    assert.equal(task.output.scriptData.revision, 3);
+    assert.equal(task.output.storyboardData.revision, 5);
+    assert.equal(task.output.storyboardData.shots[0].id, 'stable-shot');
+    assert.equal(task.output.storyboardData.shots[0].imageNodeId, 'image-1');
+    assert.deepEqual(task.output.scriptData.generatedBy, {
+        taskId: task.taskId,
+        provider: 'openai',
+        model: 'gpt-4.1-mini'
+    });
+    assert.deepEqual(task.output.storyboardData.generatedBy, task.output.scriptData.generatedBy);
+});
+
+test('story-package validation rejects invalid fields and provider failures become structured task errors', async t => {
+    const libraryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'twitcanva-story-task-validation-'));
+    const tasksDir = path.join(libraryDir, 'tasks');
+    t.after(() => fs.rmSync(libraryDir, { recursive: true, force: true }));
+    let submissions = 0;
+    const server = await startTestServer({
+        async submitTask() {
+            submissions += 1;
+            return { task: createTask(), reused: false };
+        }
+    }, libraryDir);
+    t.after(server.close);
+
+    for (const [inputSnapshot, expectedMessage] of [
+        [createStoryPackageSnapshot({ sourceText: '' }), 'sourceText is required'],
+        [createStoryPackageSnapshot({ storyboardNodeId: '' }), 'storyboardNodeId is required'],
+        [createStoryPackageSnapshot({ sceneCount: 0 }), 'sceneCount must be between 1 and 10'],
+        [createStoryPackageSnapshot({ sceneCount: 11 }), 'sceneCount must be between 1 and 10'],
+        [createStoryPackageSnapshot({ scriptRevision: -1 }), 'scriptRevision must be a non-negative integer'],
+        [createStoryPackageSnapshot({ storyboardRevision: -1 }), 'storyboardRevision must be a non-negative integer'],
+        [createStoryPackageSnapshot({ generationMode: 'unknown' }), 'generationMode must be "scripts" or "story-package"']
+    ]) {
+        const response = await fetch(`${server.baseUrl}/api/generation-tasks`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                nodeId: 'script-1',
+                operation: 'generate-story-package',
+                inputSnapshot
+            })
+        });
+        const body = await response.json();
+        assert.equal(response.status, 400);
+        assert.equal(body.error.code, 'VALIDATION_ERROR');
+        assert.equal(body.error.message, expectedMessage);
+    }
+    assert.equal(submissions, 0);
+
+    const manager = createGenerationTaskManager({
+        tasksDir,
+        concurrency: 1,
+        executor: createGenerationTaskExecutor({}, {
+            generateStoryPackageWithConfiguredProvider: async () => {
+                throw new Error('Provider timeout');
+            }
+        })
+    });
+    await manager.initialize();
+    const submitted = await manager.submitTask({
+        workflowId: 'workflow-1',
+        nodeId: 'script-1',
+        operation: 'generate-story-package',
+        provider: 'openai',
+        model: 'gpt-4.1-mini',
+        inputSnapshot: createStoryPackageSnapshot(),
+        parameters: { sceneCount: 1, generationMode: 'story-package' }
+    });
+    const failed = await waitForTaskStatus(manager, submitted.task.taskId, GenerationTaskStatus.FAILED);
+
+    assert.deepEqual(failed.error, {
+        code: 'PROVIDER_TIMEOUT',
+        message: 'Provider timeout',
+        retryable: true
+    });
+    assert.equal(failed.output, undefined);
+});
+
+test('story-package task snapshots recursively remove nested API-key-like fields before persistence', async t => {
+    const libraryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'twitcanva-story-task-sanitize-'));
+    const tasksDir = path.join(libraryDir, 'tasks');
+    t.after(() => fs.rmSync(libraryDir, { recursive: true, force: true }));
+    let releaseExecution;
+    const executionGate = new Promise(resolve => { releaseExecution = resolve; });
+    const manager = createGenerationTaskManager({
+        tasksDir,
+        concurrency: 1,
+        executor: async () => {
+            await executionGate;
+            return {};
+        }
+    });
+    await manager.initialize();
+    const server = await startTestServer(manager, libraryDir);
+    t.after(server.close);
+    const inputSnapshot = createStoryPackageSnapshot({
+        referenceAssets: [{
+            name: 'Moon reference',
+            metadata: {
+                apiKey: 'reference-secret',
+                keep: 'reference-metadata'
+            }
+        }],
+        scriptData: {
+            revision: 2,
+            nested: { openaiApiKey: 'script-secret', keep: 'script-data' }
+        },
+        storyboardData: {
+            revision: 4,
+            nested: { bearerToken: 'storyboard-secret', keep: 'storyboard-data' },
+            shots: []
+        }
+    });
+
+    const response = await fetch(`${server.baseUrl}/api/generation-tasks`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            nodeId: 'script-1',
+            operation: 'generate-story-package',
+            inputSnapshot
+        })
+    });
+    const body = await response.json();
+    assert.equal(response.status, 202);
+
+    const stored = manager.getTask(body.task.taskId);
+    const persisted = JSON.parse(fs.readFileSync(path.join(tasksDir, `${body.task.taskId}.json`), 'utf8'));
+    for (const snapshot of [stored.inputSnapshot, persisted.inputSnapshot]) {
+        assert.equal(snapshot.referenceAssets[0].metadata.apiKey, undefined);
+        assert.equal(snapshot.referenceAssets[0].metadata.keep, 'reference-metadata');
+        assert.equal(snapshot.scriptData.nested.openaiApiKey, undefined);
+        assert.equal(snapshot.scriptData.nested.keep, 'script-data');
+        assert.equal(snapshot.storyboardData.nested.bearerToken, undefined);
+        assert.equal(snapshot.storyboardData.nested.keep, 'storyboard-data');
+    }
+    releaseExecution();
+    await waitForTaskStatus(manager, body.task.taskId, GenerationTaskStatus.SUCCEEDED);
+});
+
+test('legacy story-package endpoint keeps the direct shared-provider response shape', async t => {
+    const app = express();
+    app.use(express.json());
+    app.locals.GENERATION_TASK_MANAGER = {
+        submitTask: () => assert.fail('Legacy storyboard endpoint must not submit a generation task')
+    };
+    app.use('/api/storyboard', createStoryboardRoutes({
+        generateStoryPackageWithConfiguredProvider: async ({ payload }) => ({
+            story: `Polished: ${payload.story}`,
+            styleAnchor: 'paper craft',
+            characterDNA: {},
+            scripts: [{ sceneNumber: 1, description: 'A paper moon rises' }],
+            provider: 'openai',
+            model: 'gpt-4.1-mini'
+        })
+    }));
+    const server = await new Promise(resolve => {
+        const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
+    });
+    t.after(() => new Promise(resolve => server.close(resolve)));
+    const address = server.address();
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/storyboard/generate-story-package`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ story: 'A paper moon', sceneCount: 1 })
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.story, 'Polished: A paper moon');
+    assert.equal(body.provider, 'openai');
+    assert.equal(body.model, 'gpt-4.1-mini');
+    assert.equal(body.scripts[0].description, 'A paper moon rises');
+    assert.equal(body.task, undefined);
+    assert.equal(body.output, undefined);
 });

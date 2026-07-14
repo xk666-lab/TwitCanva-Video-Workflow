@@ -53,7 +53,9 @@ router.post('/generate-story-package', async (req, res) => {
 
         console.log(`[Storyboard] Generating story package with ${count} scenes`);
 
-        const packageResult = await generateStoryPackageWithConfiguredProvider({
+        const generateStoryPackage = res.locals.storyPackageGenerator
+            || generateStoryPackageWithConfiguredProvider;
+        const packageResult = await generateStoryPackage({
             locals: req.app.locals,
             payload: {
                 story,
@@ -652,5 +654,17 @@ CRITICAL:
         res.status(500).json({ error: error.message || "Composite generation failed" });
     }
 });
+
+export function createStoryboardRoutes({
+    generateStoryPackageWithConfiguredProvider: storyPackageGenerator = generateStoryPackageWithConfiguredProvider
+} = {}) {
+    const configuredRouter = express.Router();
+    configuredRouter.use((req, res, next) => {
+        res.locals.storyPackageGenerator = storyPackageGenerator;
+        next();
+    });
+    configuredRouter.use(router);
+    return configuredRouter;
+}
 
 export default router;
