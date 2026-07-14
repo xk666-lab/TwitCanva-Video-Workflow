@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 4,
+  "id": "story-workflow",
+  "title": "Persistent Story",
+  "nodes": [
+    {
+      "id": "script-1",
+      "type": "脚本",
+      "x": 0,
+      "y": 0,
+      "prompt": "A lighthouse wakes at midnight",
+      "status": "idle",
+      "model": "auto-text",
+      "aspectRatio": "Auto",
+      "resolution": "Auto",
+      "parentIds": [],
+      "scriptData": {
+        "sourceText": "A lighthouse wakes at midnight",
+        "futureScript": true
+      }
+    },
+    {
+      "id": "storyboard-1",
+      "type": "分镜管理器",
+      "x": 440,
+      "y": 0,
+      "prompt": "",
+      "status": "idle",
+      "model": "auto-storyboard",
+      "aspectRatio": "Auto",
+      "resolution": "Auto",
+      "parentIds": ["script-1"],
+      "storyboardData": {
+        "sourceScriptNodeId": "script-1",
+        "shots": [{
+          "description": "The dark lens begins to glow",
+          "cameraAngle": "Wide shot",
+          "mood": "Mysterious",
+          "futureShot": "kept"
+        }],
+        "futureStoryboard": 9
+      }
+    }
+  ],
+  "edges": [{
+    "schemaVersion": 1,
+    "id": "edge-script-storyboard",
+    "sourceNodeId": "script-1",
+    "sourcePortId": "script-output",
+    "targetNodeId": "storyboard-1",
+    "targetPortId": "script-input",
+    "dataType": "script"
+  }],
+  "groups": [],
+  "viewport": { "x": 0, "y": 0, "zoom": 1 }
+}

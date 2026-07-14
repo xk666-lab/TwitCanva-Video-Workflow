@@ -3,6 +3,11 @@ import { createDefaultNodeData, isKnownNodeType } from '../nodes/nodeRegistry.ts
 import { normalizeWorkflowNode } from '../../utils/nodeTypeHelpers.ts';
 import { normalizeLegacyNodeTakes } from '../../utils/takeHelpers.ts';
 import {
+  normalizeLegacyStoryContext,
+  normalizeScriptDocument,
+  normalizeStoryboardDocument
+} from '../storyboard/storyboardDocuments.ts';
+import {
   migrateParentIdsToEdges,
   normalizeEdges,
   syncLegacyParentIds
@@ -86,7 +91,19 @@ function migrateNode(rawNode: unknown, index: number, warn: (message: string) =>
     parentIds: Array.isArray(candidate.parentIds) ? [...candidate.parentIds] : []
   } as NodeData;
 
-  return normalizeLegacyNodeTakes(node);
+  const takeNormalized = normalizeLegacyNodeTakes(node);
+  if (String(takeNormalized.type) === '脚本') {
+    return { ...takeNormalized, scriptData: normalizeScriptDocument(takeNormalized.scriptData) };
+  }
+  if (String(takeNormalized.type) === '分镜管理器') {
+    return {
+      ...takeNormalized,
+      storyboardData: normalizeStoryboardDocument(takeNormalized.storyboardData, {
+        ownerId: String(takeNormalized.id)
+      })
+    };
+  }
+  return takeNormalized;
 }
 
 function migrateGroup(rawGroup: unknown, index: number): NodeGroup {
@@ -104,14 +121,9 @@ function migrateGroup(rawGroup: unknown, index: number): NodeGroup {
     ...(hasStoryContext
       ? {
           storyContext: {
-            ...storyContext,
-            story: typeof storyContext.story === 'string' ? storyContext.story : '',
-            scripts: Array.isArray(storyContext.scripts)
-              ? storyContext.scripts.map(script => ({ ...asRecord(script) }))
-              : [],
-            ...(Array.isArray(storyContext.selectedCharacters)
-              ? { selectedCharacters: storyContext.selectedCharacters.map(character => ({ ...asRecord(character) })) }
-              : {})
+            ...normalizeLegacyStoryContext(storyContext, {
+              ownerId: String(group.id || `legacy-group-${index + 1}`)
+            })
           } as NodeGroup['storyContext']
         }
       : {})

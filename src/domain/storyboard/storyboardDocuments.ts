@@ -1,11 +1,13 @@
 import {
   SCRIPT_DOCUMENT_SCHEMA_VERSION,
   STORYBOARD_DOCUMENT_SCHEMA_VERSION,
+  type LegacyStoryContext,
   type ScriptDocument,
   type StoryReferenceAsset,
   type StoryboardDocument,
   type StoryboardShot,
-  type StoryboardShotStatus
+  type StoryboardShotStatus,
+  type StoryboardSessionSnapshot
 } from './storyboardTypes.ts';
 
 type UnknownRecord = Record<string, unknown>;
@@ -163,5 +165,48 @@ export function normalizeStoryboardDocument(
     ...(raw.generatedBy ? { generatedBy: { ...asRecord(raw.generatedBy) } as unknown as StoryboardDocument['generatedBy'] } : {}),
     createdAt: stringValue(raw.createdAt, defaults.createdAt),
     updatedAt: stringValue(raw.updatedAt, defaults.updatedAt)
+  };
+}
+
+export function normalizeLegacyStoryContext(
+  value: unknown,
+  options: { ownerId: string }
+): LegacyStoryContext {
+  const raw = asRecord(value);
+  return {
+    ...raw,
+    story: stringValue(raw.story),
+    scripts: Array.isArray(raw.scripts)
+      ? raw.scripts.map((shot, index) => normalizeStoryboardShot(shot, index, options.ownerId))
+      : [],
+    ...(Array.isArray(raw.selectedCharacters)
+      ? { selectedCharacters: raw.selectedCharacters.map(normalizeReferenceAsset) }
+      : {}),
+    ...(typeof raw.sceneCount === 'number' ? { sceneCount: raw.sceneCount } : {}),
+    ...(typeof raw.styleAnchor === 'string' ? { styleAnchor: raw.styleAnchor } : {}),
+    ...(raw.characterDNA ? {
+      characterDNA: Object.fromEntries(
+        Object.entries(asRecord(raw.characterDNA)).map(([key, item]) => [key, stringValue(item)])
+      )
+    } : {}),
+    ...(raw.compositeImageUrl === null || typeof raw.compositeImageUrl === 'string'
+      ? { compositeImageUrl: raw.compositeImageUrl as string | null }
+      : {}),
+    ...(typeof raw.selectedImageModel === 'string' ? { selectedImageModel: raw.selectedImageModel } : {}),
+    ...(typeof raw.scriptNodeId === 'string' ? { scriptNodeId: raw.scriptNodeId } : {}),
+    ...(typeof raw.storyboardNodeId === 'string' ? { storyboardNodeId: raw.storyboardNodeId } : {})
+  };
+}
+
+export function sessionFromLegacyStoryContext(context: LegacyStoryContext): StoryboardSessionSnapshot {
+  return {
+    story: context.story,
+    scripts: context.scripts.map(shot => ({ ...shot })),
+    selectedCharacters: (context.selectedCharacters || []).map(asset => ({ ...asset })),
+    sceneCount: context.sceneCount || Math.max(1, context.scripts.length || 3),
+    styleAnchor: context.styleAnchor || '',
+    characterDNA: { ...(context.characterDNA || {}) },
+    selectedImageModel: context.selectedImageModel || 'gpt-image-2',
+    compositeImageUrl: context.compositeImageUrl || null
   };
 }

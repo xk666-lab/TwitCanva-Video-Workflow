@@ -27,7 +27,7 @@ test('new workflow payloads use the current schema version', () => {
   assert.equal(workflow.title, 'New Workflow');
 });
 
-test('task-aware workflows migrate to schema version 4 and preserve task references', () => {
+test('task-aware workflows migrate to the current schema and preserve task references', () => {
   const migrated = migrateWorkflow({
     schemaVersion: 3,
     id: 'workflow-task-aware',
@@ -51,7 +51,7 @@ test('task-aware workflows migrate to schema version 4 and preserve task referen
     viewport: { x: 0, y: 0, zoom: 1 }
   });
 
-  assert.equal(migrated.schemaVersion, 4);
+  assert.equal(migrated.schemaVersion, CURRENT_WORKFLOW_SCHEMA_VERSION);
   assert.equal(migrated.nodes[0].activeTaskId, 'task-current');
   assert.equal(migrated.nodes[0].lastTaskId, 'task-previous');
 });
@@ -128,6 +128,29 @@ test('migration is idempotent', () => {
   const twice = migrateWorkflow(once, { warn: () => undefined });
 
   assert.deepEqual(twice, once);
+});
+
+test('story documents migrate to schema version 5 without losing unknown fields', () => {
+  const once = migrateWorkflow(fixture('workflow-script-storyboard-v4.json'));
+  const twice = migrateWorkflow(once);
+  const script = once.nodes.find(node => node.id === 'script-1');
+  const storyboard = once.nodes.find(node => node.id === 'storyboard-1');
+
+  assert.equal(once.schemaVersion, 5);
+  assert.equal(script?.scriptData?.schemaVersion, 1);
+  assert.equal((script?.scriptData as Record<string, unknown>).futureScript, true);
+  assert.equal(storyboard?.storyboardData?.shots[0].id, 'legacy-shot-storyboard-1-1');
+  assert.equal((storyboard?.storyboardData?.shots[0] as unknown as Record<string, unknown>).futureShot, 'kept');
+  assert.equal(once.edges[0].dataType, 'script');
+  assert.deepEqual(twice, once);
+});
+
+test('legacy storyboard groups gain normalized shots without visible node creation', () => {
+  const migrated = migrateWorkflow(fixture('legacy-storyboard-group.json'));
+
+  assert.equal(migrated.nodes.length, 1);
+  assert.equal(migrated.groups[0].storyContext?.scripts[0].id, 'legacy-shot-storyboard-group-1');
+  assert.equal(migrated.groups[0].storyContext?.scripts[0].order, 0);
 });
 
 test('all bundled public workflows migrate without losing nodes', () => {
