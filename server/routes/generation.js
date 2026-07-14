@@ -18,6 +18,11 @@ import { createMediaTake } from '../services/takeMetadata.js';
 import { isSeedanceVideoModel } from '../services/videoModelRouting.js';
 import { isTrustedLocalOrigin } from '../services/localOriginPolicy.js';
 import {
+    buildStoryPackageTaskOutput,
+    generateStoryboardScriptsWithConfiguredProvider,
+    generateStoryPackageWithConfiguredProvider
+} from '../services/storyboardGeneration.js';
+import {
     resolveImageToBase64,
     saveBufferToFile
 } from '../utils/imageHelpers.js';
@@ -107,7 +112,12 @@ export function recoverGenerationTaskOutput(task, locals) {
     };
 }
 
-const SUPPORTED_TASK_OPERATIONS = new Set(['generate-image', 'generate-video', 'generate-local-image']);
+const SUPPORTED_TASK_OPERATIONS = new Set([
+    'generate-image',
+    'generate-video',
+    'generate-local-image',
+    'generate-story-package'
+]);
 const SENSITIVE_TASK_INPUT_KEY = /(api.?key|authorization|access.?key|secret.?key|bearer.?token)/i;
 
 function persistTaskDataUrl(dataUrl, locals) {
@@ -143,6 +153,13 @@ function materializeTaskInput(value, locals) {
 }
 
 function resolveTaskProviderAndModel(operation, inputSnapshot, locals) {
+    if (operation === 'generate-story-package') {
+        if (locals.OPENAI_API_KEY) {
+            return { provider: 'openai', model: locals.OPENAI_TEXT_MODEL || 'gpt-4.1-mini' };
+        }
+        return { provider: 'gemini', model: 'gemini-2.0-flash' };
+    }
+
     if (operation === 'generate-local-image') {
         return {
             provider: 'local',
@@ -188,13 +205,36 @@ function pickTaskParameters(inputSnapshot) {
         'negativePrompt',
         'steps',
         'guidanceScale',
-        'seed'
+        'seed',
+        'sceneCount',
+        'generationMode'
     ];
     return Object.fromEntries(
         parameterKeys
             .filter(key => inputSnapshot[key] !== undefined)
             .map(key => [key, inputSnapshot[key]])
     );
+}
+
+function validateStoryPackageTaskInput(inputSnapshot) {
+    if (typeof inputSnapshot.sourceText !== 'string' || !inputSnapshot.sourceText.trim()) {
+        throw new TypeError('sourceText is required');
+    }
+    if (!Number.isInteger(inputSnapshot.sceneCount) || inputSnapshot.sceneCount < 1 || inputSnapshot.sceneCount > 10) {
+        throw new TypeError('sceneCount must be between 1 and 10');
+    }
+    if (typeof inputSnapshot.storyboardNodeId !== 'string' || !inputSnapshot.storyboardNodeId.trim()) {
+        throw new TypeError('storyboardNodeId is required');
+    }
+    if (!Number.isInteger(inputSnapshot.scriptRevision) || inputSnapshot.scriptRevision < 0) {
+        throw new TypeError('scriptRevision must be a non-negative integer');
+    }
+    if (!Number.isInteger(inputSnapshot.storyboardRevision) || inputSnapshot.storyboardRevision < 0) {
+        throw new TypeError('storyboardRevision must be a non-negative integer');
+    }
+    if (!['scripts', 'story-package'].includes(inputSnapshot.generationMode)) {
+        throw new TypeError('generationMode must be "scripts" or "story-package"');
+    }
 }
 
 function prepareTaskSubmission(body, locals, operationOverride) {
@@ -221,6 +261,9 @@ function prepareTaskSubmission(body, locals, operationOverride) {
         ...materializeTaskInput(rawInput, locals),
         nodeId
     };
+    if (operation === 'generate-story-package') {
+        validateStoryPackageTaskInput(inputSnapshot);
+    }
     const { provider, model } = resolveTaskProviderAndModel(operation, inputSnapshot, locals);
 
     return {
@@ -736,6 +779,19 @@ async function executeVideoGeneration(inputSnapshot, locals) {
 }
 
 export async function executeGenerationTask(task, locals) {
+    if (task.operation === 'generate-story-package') {
+        const payload = {
+            story: task.inputSnapshot.sourceText,
+            sceneCount: task.inputSnapshot.sceneCount,
+            tone: task.inputSnapshot.tone,
+            characterDescriptions: task.inputSnapshot.referenceAssets,
+            referenceImages: task.inputSnapshot.referenceAssets
+        };
+        const result = task.inputSnapshot.generationMode === 'scripts'
+            ? await generateStoryboardScriptsWithConfiguredProvider({ locals, payload })
+            : await generateStoryPackageWithConfiguredProvider({ locals, payload });
+        return buildStoryPackageTaskOutput(task, result);
+    }
     if (task.operation === 'generate-image') {
         return executeImageGeneration({ ...task.inputSnapshot, generationTaskId: task.taskId }, locals);
     }

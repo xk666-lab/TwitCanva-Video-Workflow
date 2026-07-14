@@ -359,3 +359,57 @@ test('restart reconciliation only adopts media metadata written for the interrup
     assert.equal(recovered.take.id, 'take-1');
     assert.equal(unrelated, null);
 });
+
+test('POST generation-tasks accepts story-package and derives the configured text provider', async t => {
+    const libraryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'twitcanva-story-task-route-'));
+    t.after(() => fs.rmSync(libraryDir, { recursive: true, force: true }));
+    let submission;
+    const app = express();
+    app.use(express.json());
+    app.locals.GENERATION_TASK_MANAGER = {
+        async submitTask(value) {
+            submission = value;
+            return { task: createTask({ ...value, taskId: 'story-task' }), reused: false };
+        }
+    };
+    app.locals.LIBRARY_DIR = libraryDir;
+    app.locals.IMAGES_DIR = path.join(libraryDir, 'images');
+    app.locals.VIDEOS_DIR = path.join(libraryDir, 'videos');
+    app.locals.OPENAI_API_KEY = 'key';
+    app.locals.OPENAI_TEXT_MODEL = 'gpt-4.1-mini';
+    fs.mkdirSync(app.locals.IMAGES_DIR, { recursive: true });
+    fs.mkdirSync(app.locals.VIDEOS_DIR, { recursive: true });
+    app.use('/api', generationRoutes);
+    const server = await new Promise(resolve => {
+        const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
+    });
+    t.after(() => new Promise(resolve => server.close(resolve)));
+    const address = server.address();
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/generation-tasks`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            nodeId: 'script-1',
+            operation: 'generate-story-package',
+            inputSnapshot: {
+                nodeId: 'script-1',
+                storyboardNodeId: 'storyboard-1',
+                sourceText: 'A paper moon',
+                sceneCount: 3,
+                generationMode: 'story-package',
+                scriptRevision: 0,
+                storyboardRevision: 0,
+                referenceAssets: [],
+                selectedImageModel: 'gpt-image-2',
+                scriptData: {},
+                storyboardData: {}
+            }
+        })
+    });
+
+    assert.equal(response.status, 202);
+    assert.equal(submission.provider, 'openai');
+    assert.equal(submission.model, 'gpt-4.1-mini');
+    assert.equal(submission.operation, 'generate-story-package');
+});

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    buildStoryPackageTaskOutput,
     generateStoryboardScriptsWithConfiguredProvider,
     generateStoryPackageWithConfiguredProvider,
     resolveStoryboardTextProvider
@@ -238,4 +239,68 @@ test('scripts mode keeps the legacy characterImages Gemini prompt branch injecta
     assert.deepEqual(resolvedUrls, ['legacy-character.png']);
     assert.match(promptText, /REFERENCE IMAGE FOR CHARACTER: Captain Fox/);
     assert.equal(receivedPromptParts.filter(part => part.inlineData).length, 1);
+});
+
+test('task output preserves stable shot ids and advances both document revisions', () => {
+    const task = {
+        taskId: 'task-1',
+        provider: 'openai',
+        model: 'gpt-4.1-mini',
+        inputSnapshot: {
+            scriptRevision: 2,
+            storyboardRevision: 4,
+            sourceText: 'A paper moon',
+            selectedImageModel: 'gpt-image-2',
+            scriptData: {
+                schemaVersion: 1,
+                title: 'Paper Moon',
+                sourceText: 'A paper moon',
+                synopsis: '',
+                styleAnchor: '',
+                characterDNA: {},
+                referenceAssets: [],
+                revision: 2,
+                createdAt: '2026-07-14T00:00:00.000Z',
+                updatedAt: '2026-07-14T00:00:00.000Z'
+            },
+            storyboardData: {
+                schemaVersion: 1,
+                sourceScriptNodeId: 'script-1',
+                selectedImageModel: 'gpt-image-2',
+                revision: 4,
+                createdAt: '2026-07-14T00:00:00.000Z',
+                updatedAt: '2026-07-14T00:00:00.000Z',
+                shots: [{
+                    id: 'stable-shot',
+                    order: 0,
+                    sceneNumber: 1,
+                    description: 'Old description',
+                    cameraAngle: 'Wide shot',
+                    mood: 'Old mood',
+                    imageNodeId: 'image-1',
+                    status: 'image-ready',
+                    revision: 3
+                }]
+            }
+        }
+    };
+    const output = buildStoryPackageTaskOutput(task, {
+        story: 'A polished paper moon story',
+        styleAnchor: 'paper craft',
+        characterDNA: {},
+        scripts: [{
+            sceneNumber: 1,
+            description: 'The paper moon unfolds',
+            cameraAngle: 'Wide shot',
+            cameraMovement: 'Push in',
+            lighting: 'Blue hour',
+            mood: 'Wonder'
+        }]
+    }, '2026-07-14T00:01:00.000Z');
+
+    assert.equal(output.kind, 'story-package');
+    assert.equal(output.scriptData.revision, 3);
+    assert.equal(output.storyboardData.revision, 5);
+    assert.equal(output.storyboardData.shots[0].id, 'stable-shot');
+    assert.equal(output.storyboardData.shots[0].imageNodeId, 'image-1');
 });

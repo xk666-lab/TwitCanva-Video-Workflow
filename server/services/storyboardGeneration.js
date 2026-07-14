@@ -90,6 +90,59 @@ export async function generateStoryPackageWithConfiguredProvider({
     return { ...result, provider: selected.provider, model: selected.model };
 }
 
+export function buildStoryPackageTaskOutput(task, result, now = new Date().toISOString()) {
+    const input = task.inputSnapshot;
+    const previousScript = input.scriptData || {};
+    const previousStoryboard = input.storyboardData || {};
+    const previousShots = Array.isArray(previousStoryboard.shots) ? previousStoryboard.shots : [];
+    const scripts = Array.isArray(result.scripts) ? result.scripts : [];
+    const generatedBy = { taskId: task.taskId, provider: task.provider, model: task.model };
+    const shots = scripts.map((scene, index) => {
+        const previous = previousShots[index] || {};
+        return {
+            ...previous,
+            id: previous.id || `shot-${task.nodeId}-${index + 1}`,
+            order: index,
+            sceneNumber: Number(scene.sceneNumber || index + 1),
+            description: String(scene.description || ''),
+            cameraAngle: String(scene.cameraAngle || 'Medium shot'),
+            ...(scene.cameraMovement ? { cameraMovement: String(scene.cameraMovement) } : {}),
+            ...(scene.lighting ? { lighting: String(scene.lighting) } : {}),
+            mood: String(scene.mood || ''),
+            status: previous.imageNodeId
+                ? (previous.videoNodeId ? 'video-ready' : 'image-ready')
+                : 'ready',
+            error: undefined,
+            revision: Number(previous.revision || 0) + 1
+        };
+    });
+    return {
+        kind: 'story-package',
+        scriptRevision: input.scriptRevision,
+        storyboardRevision: input.storyboardRevision,
+        scriptData: {
+            ...previousScript,
+            sourceText: input.sourceText,
+            synopsis: result.story || input.sourceText,
+            styleAnchor: result.styleAnchor || '',
+            characterDNA: result.characterDNA || {},
+            referenceAssets: input.referenceAssets || [],
+            revision: Number(input.scriptRevision) + 1,
+            generatedBy,
+            updatedAt: now
+        },
+        storyboardData: {
+            ...previousStoryboard,
+            sourceScriptNodeId: input.scriptNodeId || task.nodeId,
+            selectedImageModel: input.selectedImageModel || 'gpt-image-2',
+            shots,
+            revision: Number(input.storyboardRevision) + 1,
+            generatedBy,
+            updatedAt: now
+        }
+    };
+}
+
 function extractJsonText(text) {
     const raw = String(text || '').trim();
     if (!raw) throw new Error('AI returned an empty storyboard scripts response');
