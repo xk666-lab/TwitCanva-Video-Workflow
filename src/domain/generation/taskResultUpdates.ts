@@ -33,6 +33,25 @@ export function getUniqueActiveTaskIds(nodes: NodeData[]): string[] {
   return [...new Set(nodes.map(node => node.activeTaskId).filter((id): id is string => Boolean(id)))];
 }
 
+export async function recoverMissingMediaTaskNodes(
+  nodes: NodeData[],
+  requestedTaskIds: readonly string[],
+  returnedTaskIds: ReadonlySet<string>,
+  recoverNode: (nodeId: string, taskId: string) => Promise<void>
+): Promise<void> {
+  const requestedTaskIdSet = new Set(requestedTaskIds);
+  const missingMediaTasks = nodes.filter(node => {
+    const taskId = node.activeTaskId;
+    return node.status === 'loading' &&
+      Boolean(taskId) &&
+      requestedTaskIdSet.has(taskId) &&
+      !returnedTaskIds.has(taskId) &&
+      !node.scriptData &&
+      !node.storyboardData;
+  });
+  await Promise.all(missingMediaTasks.map(node => recoverNode(node.id, node.activeTaskId!)));
+}
+
 export function buildStoryTaskStartUpdates(
   nodes: NodeData[],
   task: GenerationTask

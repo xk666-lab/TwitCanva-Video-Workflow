@@ -5,7 +5,8 @@ import type { GenerationTask } from '../domain/generation/generationTask.ts';
 import {
   buildGenerationTaskNodeUpdates,
   buildStoryTaskStartUpdates,
-  getUniqueActiveTaskIds
+  getUniqueActiveTaskIds,
+  recoverMissingMediaTaskNodes
 } from '../domain/generation/taskResultUpdates.ts';
 import { createDefaultNodeData } from '../domain/nodes/nodeRegistry.ts';
 import { applyNodeUpdateMap } from '../domain/nodes/nodeUpdates.ts';
@@ -95,6 +96,18 @@ function task(overrides: Partial<GenerationTask> = {}): GenerationTask {
     completedAt: '2026-07-14T00:01:00.000Z',
     ...overrides
   };
+}
+
+function mediaNodes(): NodeData[] {
+  return [{
+    ...createDefaultNodeData('图片' as NodeData['type']),
+    id: 'image-1',
+    x: 0,
+    y: 0,
+    parentIds: [],
+    status: 'loading' as NodeData['status'],
+    activeTaskId: 'media-task'
+  }];
 }
 
 test('story package success updates both nodes only when task and revisions match', () => {
@@ -194,4 +207,53 @@ test('story task start refuses stale retry snapshots', () => {
     status: 'queued',
     output: undefined
   })), {});
+});
+
+test('missing media task falls back to legacy status and recovers', async () => {
+  let recoveredNodes = mediaNodes();
+  const legacyStatusCalls: Array<[string, string]> = [];
+
+  await recoverMissingMediaTaskNodes(
+    recoveredNodes,
+    ['media-task'],
+    new Set(),
+    async (nodeId, taskId) => {
+      legacyStatusCalls.push([nodeId, taskId]);
+      recoveredNodes = applyNodeUpdateMap(recoveredNodes, {
+        [nodeId]: {
+          status: 'success' as NodeData['status'],
+          resultUrl: '/library/images/recovered.png',
+          activeTaskId: undefined,
+          lastTaskId: taskId
+        }
+      });
+    }
+  );
+
+  assert.deepEqual(legacyStatusCalls, [['image-1', 'media-task']]);
+  assert.equal(recoveredNodes[0].status, 'success');
+  assert.equal(recoveredNodes[0].resultUrl, '/library/images/recovered.png');
+  assert.equal(recoveredNodes[0].activeTaskId, undefined);
+});
+
+test('missing story package tasks do not invoke legacy media recovery or receive partial updates', async () => {
+  const currentNodes = nodes();
+  const scriptDocument = currentNodes[0].scriptData;
+  const storyboardDocument = currentNodes[1].storyboardData;
+  const legacyStatusCalls: Array<[string, string]> = [];
+
+  await recoverMissingMediaTaskNodes(
+    currentNodes,
+    ['task-1'],
+    new Set(),
+    async (nodeId, taskId) => {
+      legacyStatusCalls.push([nodeId, taskId]);
+    }
+  );
+
+  assert.deepEqual(legacyStatusCalls, []);
+  assert.equal(currentNodes[0].scriptData, scriptDocument);
+  assert.equal(currentNodes[1].storyboardData, storyboardDocument);
+  assert.equal(currentNodes[0].status, 'loading');
+  assert.equal(currentNodes[1].status, 'loading');
 });

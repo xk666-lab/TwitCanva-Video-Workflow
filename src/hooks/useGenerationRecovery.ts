@@ -12,7 +12,8 @@ import { queryGenerationTasks } from '../services/generationService';
 import type { GenerationTask } from '../domain/generation/generationTask';
 import {
     buildGenerationTaskNodeUpdates,
-    getUniqueActiveTaskIds
+    getUniqueActiveTaskIds,
+    recoverMissingMediaTaskNodes
 } from '../domain/generation/taskResultUpdates';
 import type { NodeUpdateMap } from '../domain/nodes/nodeUpdates';
 import { buildGenerationSuccessUpdate } from '../utils/takeHelpers';
@@ -76,12 +77,13 @@ export const useGenerationRecovery = ({
     const isCheckingRef = useRef(false);
     nodesRef.current = nodes;
 
-    const checkLegacyStatus = useCallback(async (nodeId: string) => {
+    const checkLegacyStatus = useCallback(async (nodeId: string, expectedTaskId?: string) => {
         try {
             const data = await apiGet<any>(`/api/generation-status/${nodeId}`);
+            if (expectedTaskId && data.task?.taskId && data.task.taskId !== expectedTaskId) return;
             if (data.status === 'success' && data.resultUrl) {
                 const node = nodesRef.current.find(n => n.id === nodeId);
-                if (!node || node.activeTaskId) return;
+                if (!node || (expectedTaskId ? node.activeTaskId !== expectedTaskId : node.activeTaskId)) return;
                 const generationMarker = node.generationStartTime;
 
                 // Race condition check: If node has a generationStartTime, compare with result's createdAt
@@ -108,14 +110,21 @@ export const useGenerationRecovery = ({
                 }
 
                 const currentNode = nodesRef.current.find(candidate => candidate.id === nodeId);
-                if (!currentNode || currentNode.activeTaskId) return;
+                if (!currentNode || (expectedTaskId
+                    ? currentNode.activeTaskId !== expectedTaskId
+                    : currentNode.activeTaskId)) return;
                 if (generationMarker && currentNode.generationStartTime !== generationMarker) return;
                 updateNode(nodeId, {
                     ...buildGenerationSuccessUpdate(currentNode, { resultUrl: data.resultUrl, take: data.take }),
-                    ...extraUpdates
+                    ...extraUpdates,
+                    ...(expectedTaskId ? {
+                        activeTaskId: undefined,
+                        lastTaskId: expectedTaskId
+                    } : {})
                 });
             } else if (data.status === 'error' || data.status === 'cancelled') {
                 const node = nodesRef.current.find(candidate => candidate.id === nodeId);
+                if (expectedTaskId && node?.activeTaskId !== expectedTaskId) return;
                 if (node?.generationStartTime && data.createdAt) {
                     const taskCreatedAt = new Date(data.createdAt).getTime();
                     if (taskCreatedAt < node.generationStartTime) return;
@@ -126,7 +135,7 @@ export const useGenerationRecovery = ({
                         ? 'Generation was cancelled.'
                         : 'Generation failed.'),
                     activeTaskId: undefined,
-                    lastTaskId: data.task?.taskId,
+                    lastTaskId: expectedTaskId || data.task?.taskId,
                     generationStartTime: undefined
                 });
             }
@@ -190,7 +199,14 @@ export const useGenerationRecovery = ({
                 if (taskIds.length > 0) {
                     try {
                         const tasks = await queryGenerationTasks({ taskIds });
+                        const returnedTaskIds = new Set(tasks.map(task => task.taskId));
                         await Promise.all(tasks.map(task => applyTask(task)));
+                        await recoverMissingMediaTaskNodes(
+                            loadingNodes,
+                            taskIds,
+                            returnedTaskIds,
+                            checkLegacyStatus
+                        );
                     } catch (error) {
                         console.error('[Recovery] Error querying generation tasks:', error);
                     }
