@@ -9,6 +9,7 @@ import { useCallback, useRef, useState, type Dispatch, type SetStateAction } fro
 import { NodeData, NodeType, Viewport } from '../types';
 import { createDefaultNodeData } from '../domain/nodes/nodeRegistry';
 import { applyNodeUpdateMap, type NodeUpdateMap } from '../domain/nodes/nodeUpdates';
+import { removeNodesAndNormalizeStoryboardMediaReferences } from '../domain/storyboard/storyboardGraph';
 import type { CanvasEdge, ConnectionValidationResult } from '../domain/graph/graphTypes';
 import { CURRENT_EDGE_SCHEMA_VERSION } from '../domain/graph/graphTypes';
 import { resolveConnectionPorts, validateConnection } from '../domain/graph/connectionRules';
@@ -172,7 +173,7 @@ export const useNodeManagement = () => {
      * @param id - Node ID to delete
      */
     const deleteNode = (id: string) => {
-        setNodes(prev => prev.filter(n => n.id !== id));
+        setNodes(prev => removeNodesAndNormalizeStoryboardMediaReferences(prev, [id]));
         setSelectedNodeIds(prev => prev.filter(nodeId => nodeId !== id));
     };
 
@@ -181,7 +182,7 @@ export const useNodeManagement = () => {
      * @param ids - Array of node IDs to delete
      */
     const deleteNodes = (ids: string[]) => {
-        setNodes(prev => prev.filter(n => !ids.includes(n.id)));
+        setNodes(prev => removeNodesAndNormalizeStoryboardMediaReferences(prev, ids));
         setSelectedNodeIds([]);
     };
 

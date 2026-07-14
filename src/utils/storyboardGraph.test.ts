@@ -11,6 +11,7 @@ import {
   ensureStoryboardNodePair,
   getEffectiveStoryContext,
   materializeLegacyStoryboardGroup,
+  removeNodesAndNormalizeStoryboardMediaReferences,
   syncLegacyStoryboardContexts
 } from '../domain/storyboard/storyboardGraph.ts';
 import { applyNodeUpdateMap } from '../domain/nodes/nodeUpdates.ts';
@@ -238,4 +239,141 @@ test('shot task projections follow linked media nodes and clear dangling ids', (
   assert.equal(shot?.lastTaskId, 'video-task');
   assert.equal(shot?.imageNodeId, undefined);
   assert.equal(updates['storyboard-status'].storyboardData?.revision, 0);
+});
+
+test('removing media nodes clears only their shot references and preserves unrelated nodes', () => {
+  const storyboard = {
+    ...createDefaultNodeData('分镜管理器' as NodeData['type']),
+    id: 'storyboard-cleanup',
+    x: 0,
+    y: 0,
+    parentIds: [],
+    storyboardData: {
+      ...createDefaultNodeData('分镜管理器' as NodeData['type']).storyboardData!,
+      shots: [{
+        id: 'shot-remove',
+        order: 0,
+        sceneNumber: 1,
+        description: 'Remove linked media',
+        cameraAngle: 'Wide shot',
+        mood: '',
+        imageNodeId: 'image-remove',
+        videoNodeId: 'video-remove',
+        status: 'video-ready' as const,
+        revision: 0
+      }, {
+        id: 'shot-keep',
+        order: 1,
+        sceneNumber: 2,
+        description: 'Keep linked media',
+        cameraAngle: 'Close up',
+        mood: '',
+        imageNodeId: 'image-keep',
+        videoNodeId: 'video-keep',
+        status: 'video-ready' as const,
+        revision: 0
+      }]
+    }
+  } as NodeData;
+  const nodes = [
+    storyboard,
+    {
+      ...createDefaultNodeData('脚本' as NodeData['type']),
+      id: 'script-keep',
+      x: 0,
+      y: 0,
+      parentIds: []
+    },
+    {
+      ...createDefaultNodeData('图片' as NodeData['type']),
+      id: 'image-remove',
+      x: 0,
+      y: 0,
+      parentIds: []
+    },
+    {
+      ...createDefaultNodeData('视频' as NodeData['type']),
+      id: 'video-remove',
+      x: 0,
+      y: 0,
+      parentIds: []
+    },
+    {
+      ...createDefaultNodeData('图片' as NodeData['type']),
+      id: 'image-keep',
+      x: 0,
+      y: 0,
+      parentIds: []
+    },
+    {
+      ...createDefaultNodeData('视频' as NodeData['type']),
+      id: 'video-keep',
+      x: 0,
+      y: 0,
+      parentIds: []
+    },
+    {
+      ...createDefaultNodeData('文本' as NodeData['type']),
+      id: 'text-keep',
+      x: 0,
+      y: 0,
+      parentIds: []
+    }
+  ] as NodeData[];
+
+  const remaining = removeNodesAndNormalizeStoryboardMediaReferences(
+    nodes,
+    ['image-remove', 'video-remove'],
+    NOW
+  );
+  const updatedStoryboard = remaining.find(node => node.id === 'storyboard-cleanup');
+  assert.ok(updatedStoryboard?.storyboardData);
+
+  assert.deepEqual(remaining.map(node => node.id), [
+    'storyboard-cleanup',
+    'script-keep',
+    'image-keep',
+    'video-keep',
+    'text-keep'
+  ]);
+  assert.equal(updatedStoryboard.storyboardData.shots[0].imageNodeId, undefined);
+  assert.equal(updatedStoryboard.storyboardData.shots[0].videoNodeId, undefined);
+  assert.equal(updatedStoryboard.storyboardData.shots[1].imageNodeId, 'image-keep');
+  assert.equal(updatedStoryboard.storyboardData.shots[1].videoNodeId, 'video-keep');
+});
+
+test('legacy story context unknown fields survive document-backed sync', () => {
+  const ids = ['script-context', 'storyboard-context', 'edge-context'];
+  const created = createStoryboardDraftGraph({
+    nodes: [],
+    edges: [],
+    center: { x: 0, y: 0 },
+    session: {
+      story: 'Node documents are authoritative',
+      scripts: [],
+      selectedCharacters: [],
+      sceneCount: 1,
+      styleAnchor: '',
+      characterDNA: {},
+      selectedImageModel: 'gpt-image-2',
+      compositeImageUrl: null
+    },
+    idFactory: () => ids.shift() || 'unexpected',
+    now: NOW
+  });
+  const synced = syncLegacyStoryboardContexts(created.nodes, [{
+    id: 'group-context',
+    nodeIds: [],
+    label: 'Storyboard',
+    storyContext: {
+      story: 'Stale legacy story',
+      scripts: [],
+      scriptNodeId: 'script-context',
+      storyboardNodeId: 'storyboard-context',
+      futureLegacySetting: { enabled: true }
+    }
+  }]);
+
+  assert.equal(synced[0].storyContext?.story, 'Node documents are authoritative');
+  assert.deepEqual(synced[0].storyContext?.futureLegacySetting, { enabled: true });
 });

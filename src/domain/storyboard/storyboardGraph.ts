@@ -10,7 +10,7 @@ import {
   sessionFromLegacyStoryContext
 } from './storyboardDocuments.ts';
 import type { StoryboardDocument, StoryboardSessionSnapshot } from './storyboardTypes.ts';
-import type { NodeUpdateMap } from '../nodes/nodeUpdates.ts';
+import { applyNodeUpdateMap, type NodeUpdateMap } from '../nodes/nodeUpdates.ts';
 
 interface GraphResult {
   nodes: NodeData[];
@@ -202,9 +202,17 @@ export function getEffectiveStoryContext(group: NodeGroup, nodes: NodeData[]) {
 }
 
 export function syncLegacyStoryboardContexts(nodes: NodeData[], groups: NodeGroup[]): NodeGroup[] {
-  return groups.map(group => group.storyContext
-    ? { ...group, storyContext: getEffectiveStoryContext(group, nodes) }
-    : group);
+  return groups.map(group => {
+    if (!group.storyContext) return group;
+    const legacyContext = normalizeLegacyStoryContext(group.storyContext, { ownerId: group.id });
+    return {
+      ...group,
+      storyContext: {
+        ...legacyContext,
+        ...getEffectiveStoryContext(group, nodes)
+      }
+    };
+  });
 }
 
 export function attachImageNodesToShots(
@@ -289,4 +297,17 @@ export function buildStoryboardMediaProjectionUpdates(
     }
   }
   return updates;
+}
+
+export function removeNodesAndNormalizeStoryboardMediaReferences(
+  nodes: NodeData[],
+  nodeIds: Iterable<string>,
+  now = new Date().toISOString()
+): NodeData[] {
+  const nodeIdsToRemove = new Set(nodeIds);
+  const remainingNodes = nodes.filter(node => !nodeIdsToRemove.has(node.id));
+  return applyNodeUpdateMap(
+    remainingNodes,
+    buildStoryboardMediaProjectionUpdates(remainingNodes, now)
+  );
 }
