@@ -12,6 +12,7 @@ import {
   getEffectiveStoryContext,
   materializeLegacyStoryboardGroup,
   removeNodesAndNormalizeStoryboardMediaReferences,
+  syncBoundStoryboardGroupContexts,
   syncLegacyStoryboardContexts
 } from '../domain/storyboard/storyboardGraph.ts';
 import { applyNodeUpdateMap } from '../domain/nodes/nodeUpdates.ts';
@@ -453,4 +454,70 @@ test('legacy story context unknown fields survive document-backed sync', () => {
 
   assert.equal(synced[0].storyContext?.story, 'Node documents are authoritative');
   assert.deepEqual(synced[0].storyContext?.futureLegacySetting, { enabled: true });
+});
+
+test('bound story context sync updates only its pair and preserves unknown legacy fields', () => {
+  const ids = ['script-bound', 'storyboard-bound', 'edge-bound'];
+  const created = createStoryboardDraftGraph({
+    nodes: [],
+    edges: [],
+    center: { x: 0, y: 0 },
+    session: {
+      story: 'Persistent story document',
+      scripts: [],
+      selectedCharacters: [],
+      sceneCount: 1,
+      styleAnchor: 'cinematic',
+      characterDNA: {},
+      selectedImageModel: 'gpt-image-2',
+      compositeImageUrl: null
+    },
+    idFactory: () => ids.shift() || 'unexpected',
+    now: NOW
+  });
+  const scriptData = created.nodes.find(node => node.id === created.scriptNodeId)?.scriptData;
+  const storyboardData = created.nodes.find(node => node.id === created.storyboardNodeId)?.storyboardData;
+  assert.ok(scriptData && storyboardData);
+  const groups: NodeGroup[] = [
+    {
+      id: 'bound-group',
+      nodeIds: [],
+      label: 'Bound storyboard',
+      storyContext: {
+        story: 'Stale legacy story',
+        scripts: [],
+        scriptNodeId: created.scriptNodeId,
+        storyboardNodeId: created.storyboardNodeId,
+        futureLegacySetting: { enabled: true }
+      }
+    },
+    {
+      id: 'unrelated-group',
+      nodeIds: [],
+      label: 'Unrelated storyboard',
+      storyContext: {
+        story: 'Leave this alone',
+        scripts: [],
+        scriptNodeId: 'other-script',
+        storyboardNodeId: 'other-storyboard'
+      }
+    }
+  ];
+
+  const synced = syncBoundStoryboardGroupContexts(groups, {
+    scriptNodeId: created.scriptNodeId,
+    storyboardNodeId: created.storyboardNodeId,
+    scriptData,
+    storyboardData
+  });
+
+  assert.equal(synced[0].storyContext?.story, 'Persistent story document');
+  assert.deepEqual(synced[0].storyContext?.futureLegacySetting, { enabled: true });
+  assert.equal(synced[1], groups[1]);
+  assert.equal(syncBoundStoryboardGroupContexts(synced, {
+    scriptNodeId: created.scriptNodeId,
+    storyboardNodeId: created.storyboardNodeId,
+    scriptData,
+    storyboardData
+  }), synced);
 });

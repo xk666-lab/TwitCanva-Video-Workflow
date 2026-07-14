@@ -9,7 +9,11 @@ import {
   normalizeLegacyStoryContext,
   sessionFromLegacyStoryContext
 } from './storyboardDocuments.ts';
-import type { StoryboardDocument, StoryboardSessionSnapshot } from './storyboardTypes.ts';
+import type {
+  ScriptDocument,
+  StoryboardDocument,
+  StoryboardSessionSnapshot
+} from './storyboardTypes.ts';
 import { applyNodeUpdateMap, type NodeUpdateMap } from '../nodes/nodeUpdates.ts';
 
 interface GraphResult {
@@ -218,6 +222,45 @@ export function syncLegacyStoryboardContexts(nodes: NodeData[], groups: NodeGrou
       }
     };
   });
+}
+
+export function syncBoundStoryboardGroupContexts(
+  groups: NodeGroup[],
+  options: {
+    scriptNodeId: string;
+    storyboardNodeId: string;
+    scriptData: ScriptDocument;
+    storyboardData: StoryboardDocument;
+  }
+): NodeGroup[] {
+  const mirror = legacyStoryContextFromDocuments(
+    options.scriptData,
+    options.storyboardData,
+    {
+      scriptNodeId: options.scriptNodeId,
+      storyboardNodeId: options.storyboardNodeId
+    }
+  );
+  let changed = false;
+  const nextGroups = groups.map(group => {
+    const previousContext = group.storyContext;
+    if (
+      !previousContext ||
+      previousContext.scriptNodeId !== options.scriptNodeId ||
+      previousContext.storyboardNodeId !== options.storyboardNodeId
+    ) {
+      return group;
+    }
+
+    const storyContext = { ...previousContext, ...mirror };
+    if (JSON.stringify(previousContext) === JSON.stringify(storyContext)) {
+      return group;
+    }
+
+    changed = true;
+    return { ...group, storyContext };
+  });
+  return changed ? nextGroups : groups;
 }
 
 export function attachImageNodesToShots(

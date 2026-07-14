@@ -7,7 +7,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Sparkles, Film, Loader2, Play, Check, ChevronDown, Wand2, Trash2 } from 'lucide-react';
-import { NodeData, NodeGroup } from '../../types';
+import type { NodeData } from '../../types';
+import type { LegacyStoryContext } from '../../domain/storyboard/storyboardTypes';
 import { GoogleIcon, KlingIcon, HailuoIcon } from '../icons/BrandIcons';
 import {
     getAvailableStoryboardVideoResolutions,
@@ -30,7 +31,7 @@ interface StoryboardVideoModalProps {
         },
         activeNodeIds: string[]
     ) => void;
-    storyContext?: NodeGroup['storyContext'];
+    storyContext?: LegacyStoryContext;
 }
 
 const providerFamilies = getStoryboardVideoProviderFamilies();

@@ -61,6 +61,9 @@ export interface StoryboardShot {
   [key: string]: unknown;
 }
 
+export type CharacterAsset = StoryReferenceAsset;
+export type SceneScript = StoryboardShot;
+
 export interface StoryboardDocument {
   schemaVersion: number;
   sourceScriptNodeId: string;

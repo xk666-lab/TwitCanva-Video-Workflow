@@ -508,17 +508,20 @@ export default function App() {
   }, [setNodes, setSelectedNodeIds, setGroups]);
 
   const storyboardGenerator = useStoryboardGenerator({
+    nodes,
+    edges,
+    groups,
+    workflowId,
+    replaceGraph,
+    applyNodeUpdates,
+    setGroups,
     onCreateNodes: handleCreateStoryboardNodes,
     viewport
   });
 
   const handleEditStoryboard = React.useCallback((groupId: string) => {
-    const group = groups.find(g => g.id === groupId);
-    if (group?.storyContext) {
-      console.log('[App] Editing storyboard:', groupId);
-      storyboardGenerator.editStoryboard(group.storyContext);
-    }
-  }, [groups, storyboardGenerator]);
+    storyboardGenerator.editLegacyStoryboard(groupId);
+  }, [storyboardGenerator]);
 
   // Storyboard Video Modal State
   const [storyboardVideoModal, setStoryboardVideoModal] = useState<{

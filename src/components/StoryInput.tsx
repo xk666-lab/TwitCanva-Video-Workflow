@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { CharacterAsset } from '../hooks/useStoryboardGenerator';
+import type { CharacterAsset } from '../domain/storyboard/storyboardTypes';
 
 interface StoryInputProps {
     value: string;

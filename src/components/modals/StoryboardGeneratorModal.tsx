@@ -7,7 +7,8 @@
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { X, ChevronRight, ChevronLeft, Loader2, Film, Users, PenTool, Sparkles, Check, Edit3, Wand2, Eye, ChevronDown } from 'lucide-react';
-import { CharacterAsset, SceneScript, StoryboardState } from '../../hooks/useStoryboardGenerator';
+import type { StoryboardState } from '../../hooks/useStoryboardGenerator';
+import type { CharacterAsset, SceneScript } from '../../domain/storyboard/storyboardTypes';
 import { StoryInput } from '../StoryInput';
 import { getStoryboardImageModelName, STORYBOARD_IMAGE_MODELS } from '../../utils/storyboardModelOptions';
 

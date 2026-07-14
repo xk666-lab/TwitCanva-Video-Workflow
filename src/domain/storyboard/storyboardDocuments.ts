@@ -238,6 +238,86 @@ export function documentsFromSession(options: {
   };
 }
 
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+export function sessionFromDocuments(
+  scriptData: ScriptDocument,
+  storyboardData: StoryboardDocument
+): StoryboardSessionSnapshot {
+  return {
+    story: scriptData.sourceText || scriptData.synopsis,
+    scripts: storyboardData.shots.map(shot => ({ ...shot })),
+    selectedCharacters: scriptData.referenceAssets.map(asset => ({ ...asset })),
+    sceneCount: Math.max(1, storyboardData.shots.length || 3),
+    styleAnchor: scriptData.styleAnchor,
+    characterDNA: { ...scriptData.characterDNA },
+    selectedImageModel: storyboardData.selectedImageModel,
+    compositeImageUrl: storyboardData.compositeImageUrl || null
+  };
+}
+
+export function mergeSessionIntoDocuments(options: {
+  scriptData: ScriptDocument;
+  storyboardData: StoryboardDocument;
+  session: StoryboardSessionSnapshot;
+  now?: string;
+}): { scriptData: ScriptDocument; storyboardData: StoryboardDocument } {
+  const now = options.now || new Date().toISOString();
+  const scriptFields = {
+    sourceText: options.session.story,
+    styleAnchor: options.session.styleAnchor,
+    characterDNA: options.session.characterDNA,
+    referenceAssets: options.session.selectedCharacters
+  };
+  const previousScriptFields = {
+    sourceText: options.scriptData.sourceText,
+    styleAnchor: options.scriptData.styleAnchor,
+    characterDNA: options.scriptData.characterDNA,
+    referenceAssets: options.scriptData.referenceAssets
+  };
+  const shots = options.session.scripts.map((incoming, index) => {
+    const previous = options.storyboardData.shots.find(shot => shot.id === incoming.id)
+      || options.storyboardData.shots[index];
+    const normalized = normalizeStoryboardShot({ ...previous, ...incoming }, index, 'session');
+    const changed = !previous || !sameJson(
+      { ...previous, order: index },
+      { ...normalized, order: index }
+    );
+    return {
+      ...normalized,
+      revision: changed ? (previous?.revision || 0) + 1 : (previous?.revision || 0)
+    };
+  });
+  const storyboardFields = {
+    shots,
+    selectedImageModel: options.session.selectedImageModel,
+    compositeImageUrl: options.session.compositeImageUrl
+  };
+  const previousStoryboardFields = {
+    shots: options.storyboardData.shots,
+    selectedImageModel: options.storyboardData.selectedImageModel,
+    compositeImageUrl: options.storyboardData.compositeImageUrl || null
+  };
+  const scriptChanged = !sameJson(scriptFields, previousScriptFields);
+  const storyboardChanged = !sameJson(storyboardFields, previousStoryboardFields);
+  return {
+    scriptData: scriptChanged ? {
+      ...options.scriptData,
+      ...scriptFields,
+      revision: options.scriptData.revision + 1,
+      updatedAt: now
+    } : options.scriptData,
+    storyboardData: storyboardChanged ? {
+      ...options.storyboardData,
+      ...storyboardFields,
+      revision: options.storyboardData.revision + 1,
+      updatedAt: now
+    } : options.storyboardData
+  };
+}
+
 export function legacyStoryContextFromDocuments(
   scriptData: ScriptDocument,
   storyboardData: StoryboardDocument,

@@ -4,8 +4,10 @@ import test from 'node:test';
 import {
   createEmptyScriptDocument,
   createEmptyStoryboardDocument,
+  mergeSessionIntoDocuments,
   normalizeScriptDocument,
-  normalizeStoryboardDocument
+  normalizeStoryboardDocument,
+  sessionFromDocuments
 } from '../domain/storyboard/storyboardDocuments.ts';
 
 const NOW = '2026-07-14T00:00:00.000Z';
@@ -78,4 +80,60 @@ test('script normalization does not mutate its input', () => {
   assert.deepEqual(normalized.generatedBy, raw.generatedBy);
   assert.notEqual(normalized.generatedBy, raw.generatedBy);
   assert.equal((normalized as Record<string, unknown>).futureField, 'kept');
+});
+
+test('session edits advance only the document whose persistent fields changed', () => {
+  const script = createEmptyScriptDocument({ sourceText: 'Old story', now: NOW });
+  const storyboard = {
+    ...createEmptyStoryboardDocument({ sourceScriptNodeId: 'script-1', now: NOW }),
+    shots: [{
+      id: 'shot-1',
+      order: 0,
+      sceneNumber: 1,
+      description: 'Old shot',
+      cameraAngle: 'Wide shot',
+      mood: 'Calm',
+      imageNodeId: 'image-1',
+      status: 'image-ready' as const,
+      revision: 2
+    }]
+  };
+  const merged = mergeSessionIntoDocuments({
+    scriptData: script,
+    storyboardData: storyboard,
+    session: {
+      story: 'New story',
+      scripts: [{
+        ...storyboard.shots[0],
+        description: 'New shot'
+      }],
+      selectedCharacters: [],
+      sceneCount: 1,
+      styleAnchor: '',
+      characterDNA: {},
+      selectedImageModel: 'gpt-image-2',
+      compositeImageUrl: null
+    },
+    now: '2026-07-14T00:02:00.000Z'
+  });
+
+  assert.equal(merged.scriptData.revision, 1);
+  assert.equal(merged.storyboardData.revision, 1);
+  assert.equal(merged.storyboardData.shots[0].id, 'shot-1');
+  assert.equal(merged.storyboardData.shots[0].imageNodeId, 'image-1');
+  assert.equal(merged.storyboardData.shots[0].revision, 3);
+});
+
+test('document to session projection preserves current modal fields', () => {
+  const script = {
+    ...createEmptyScriptDocument({ sourceText: 'A story', now: NOW }),
+    styleAnchor: 'cinematic',
+    characterDNA: { Hero: 'red coat' }
+  };
+  const storyboard = createEmptyStoryboardDocument({ sourceScriptNodeId: 'script-1', now: NOW });
+  const session = sessionFromDocuments(script, storyboard);
+
+  assert.equal(session.story, 'A story');
+  assert.equal(session.styleAnchor, 'cinematic');
+  assert.deepEqual(session.characterDNA, { Hero: 'red coat' });
 });
