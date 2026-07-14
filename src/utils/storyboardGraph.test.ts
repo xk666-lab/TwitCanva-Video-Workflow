@@ -115,12 +115,16 @@ test('legacy materialization is lazy and idempotent', () => {
     idFactory: () => idValues.shift() || 'unexpected',
     now: NOW
   });
+  let repeatedIdFactoryCalls = 0;
   const second = materializeLegacyStoryboardGroup({
     group: first.group,
     nodes: first.nodes,
     edges: first.edges,
     anchor: { x: 0, y: 0 },
-    idFactory: () => 'must-not-be-used',
+    idFactory: () => {
+      repeatedIdFactoryCalls += 1;
+      return 'must-not-be-used';
+    },
     now: NOW
   });
 
@@ -128,6 +132,7 @@ test('legacy materialization is lazy and idempotent', () => {
   assert.equal(first.group.storyContext?.scriptNodeId, 'script-new');
   assert.equal(first.group.storyContext?.storyboardNodeId, 'storyboard-new');
   assert.deepEqual(second, first);
+  assert.equal(repeatedIdFactoryCalls, 0);
 });
 
 test('new documents project to legacy context and media ids attach by shot order', () => {
@@ -340,6 +345,78 @@ test('removing media nodes clears only their shot references and preserves unrel
   assert.equal(updatedStoryboard.storyboardData.shots[0].videoNodeId, undefined);
   assert.equal(updatedStoryboard.storyboardData.shots[1].imageNodeId, 'image-keep');
   assert.equal(updatedStoryboard.storyboardData.shots[1].videoNodeId, 'video-keep');
+});
+
+test('removing a non-media node leaves unrelated storyboard documents untouched', () => {
+  const storyboard = {
+    ...createDefaultNodeData('分镜管理器' as NodeData['type']),
+    id: 'storyboard-untouched',
+    x: 0,
+    y: 0,
+    parentIds: [],
+    storyboardData: {
+      ...createDefaultNodeData('分镜管理器' as NodeData['type']).storyboardData!,
+      revision: 7,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+      shots: [{
+        id: 'shot-untouched',
+        order: 0,
+        sceneNumber: 1,
+        description: 'Keep every field',
+        cameraAngle: 'Wide shot',
+        mood: '',
+        imageNodeId: 'image-untouched',
+        videoNodeId: 'video-untouched',
+        activeTaskId: 'active-task',
+        lastTaskId: 'last-task',
+        status: 'failed' as const,
+        error: 'Keep this error',
+        revision: 4
+      }]
+    }
+  } as NodeData;
+  const image = {
+    ...createDefaultNodeData('图片' as NodeData['type']),
+    id: 'image-untouched',
+    x: 0,
+    y: 0,
+    parentIds: [],
+    status: 'success' as NodeData['status']
+  } as NodeData;
+  const video = {
+    ...createDefaultNodeData('视频' as NodeData['type']),
+    id: 'video-untouched',
+    x: 0,
+    y: 0,
+    parentIds: [],
+    status: 'success' as NodeData['status'],
+    lastTaskId: 'video-task'
+  } as NodeData;
+  const unrelated = {
+    ...createDefaultNodeData('文本' as NodeData['type']),
+    id: 'text-remove',
+    x: 0,
+    y: 0,
+    parentIds: []
+  } as NodeData;
+  const originalStoryboardData = structuredClone(storyboard.storyboardData);
+
+  const remaining = removeNodesAndNormalizeStoryboardMediaReferences(
+    [storyboard, image, video, unrelated],
+    ['text-remove'],
+    NOW
+  );
+  const updatedStoryboard = remaining.find(node => node.id === 'storyboard-untouched');
+
+  assert.ok(updatedStoryboard?.storyboardData);
+  assert.deepEqual(remaining.map(node => node.id), [
+    'storyboard-untouched',
+    'image-untouched',
+    'video-untouched'
+  ]);
+  assert.equal(updatedStoryboard, storyboard);
+  assert.deepEqual(updatedStoryboard.storyboardData, originalStoryboardData);
 });
 
 test('legacy story context unknown fields survive document-backed sync', () => {

@@ -134,17 +134,22 @@ export function ensureStoryboardNodePair(options: {
     edge.targetNodeId === storyboardNodeId &&
     edge.targetPortId === 'script-input'
   );
-  const scriptToStoryboardEdge: CanvasEdge = {
-    schemaVersion: CURRENT_EDGE_SCHEMA_VERSION,
-    id: idFactory(),
-    sourceNodeId: scriptNodeId,
-    sourcePortId: 'script-output',
-    targetNodeId: storyboardNodeId,
-    targetPortId: 'script-input',
-    dataType: 'script',
-    createdAt: now
-  };
-  const edges = hasEdge ? options.edges : [...options.edges, scriptToStoryboardEdge];
+  let edges: CanvasEdge[];
+  if (hasEdge) {
+    edges = options.edges;
+  } else {
+    const scriptToStoryboardEdge: CanvasEdge = {
+      schemaVersion: CURRENT_EDGE_SCHEMA_VERSION,
+      id: idFactory(),
+      sourceNodeId: scriptNodeId,
+      sourcePortId: 'script-output',
+      targetNodeId: storyboardNodeId,
+      targetPortId: 'script-input',
+      dataType: 'script',
+      createdAt: now
+    };
+    edges = [...options.edges, scriptToStoryboardEdge];
+  }
   const replacements = new Map([
     [scriptNodeId, scriptNode],
     [storyboardNodeId, storyboardNode]
@@ -305,9 +310,40 @@ export function removeNodesAndNormalizeStoryboardMediaReferences(
   now = new Date().toISOString()
 ): NodeData[] {
   const nodeIdsToRemove = new Set(nodeIds);
+  const removedMediaNodeIds = new Set(nodes
+    .filter(node => nodeIdsToRemove.has(node.id) && (
+      String(node.type) === '图片' || String(node.type) === '视频'
+    ))
+    .map(node => node.id));
   const remainingNodes = nodes.filter(node => !nodeIdsToRemove.has(node.id));
-  return applyNodeUpdateMap(
-    remainingNodes,
-    buildStoryboardMediaProjectionUpdates(remainingNodes, now)
-  );
+  if (removedMediaNodeIds.size === 0) return remainingNodes;
+
+  const updates: NodeUpdateMap = {};
+  for (const storyboardNode of remainingNodes.filter(node =>
+    String(node.type) === '分镜管理器' && node.storyboardData
+  )) {
+    let changed = false;
+    const shots = storyboardNode.storyboardData!.shots.map(shot => {
+      const imageNodeRemoved = Boolean(shot.imageNodeId && removedMediaNodeIds.has(shot.imageNodeId));
+      const videoNodeRemoved = Boolean(shot.videoNodeId && removedMediaNodeIds.has(shot.videoNodeId));
+      if (!imageNodeRemoved && !videoNodeRemoved) return shot;
+
+      changed = true;
+      return {
+        ...shot,
+        ...(imageNodeRemoved ? { imageNodeId: undefined } : {}),
+        ...(videoNodeRemoved ? { videoNodeId: undefined } : {})
+      };
+    });
+    if (changed) {
+      updates[storyboardNode.id] = {
+        storyboardData: {
+          ...storyboardNode.storyboardData!,
+          shots,
+          updatedAt: now
+        }
+      };
+    }
+  }
+  return applyNodeUpdateMap(remainingNodes, updates);
 }
