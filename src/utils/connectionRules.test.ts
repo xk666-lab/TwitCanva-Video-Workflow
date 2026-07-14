@@ -53,6 +53,37 @@ test('TEXT to TEXT and VIDEO to IMAGE are rejected', () => {
   assert.equal(resolveConnectionPorts(node('video', '视频'), node('image', '图片'), []).valid, false);
 });
 
+test('AUDIO to VIDEO resolves to the explicit audio-reference input', () => {
+  const source = node('audio', '音频', { resultUrl: '/library/audio/voice.mp3' });
+  const target = node('video', '视频', { videoModel: 'bytedance/seedance-2.0/text-to-video' });
+  const resolution = resolveConnectionPorts(source, target, []);
+
+  assert.equal(resolution.valid, true);
+  if (!resolution.valid) return;
+  assert.equal(resolution.sourcePort.id, 'audio-output');
+  assert.equal(resolution.targetPort.id, 'audio-reference');
+  assert.equal(validateConnection({
+    sourceNode: source,
+    sourcePort: resolution.sourcePort,
+    targetNode: target,
+    targetPort: resolution.targetPort,
+    existingEdges: []
+  }).valid, true);
+});
+
+test('AUDIO to a video model without audio-reference support is rejected before creating an edge', () => {
+  const resolution = resolveConnectionPorts(
+    node('audio', '音频', { resultUrl: '/library/audio/voice.mp3' }),
+    node('veo', '视频', { videoModel: 'veo-3.1' }),
+    []
+  );
+
+  assert.equal(resolution.valid, false);
+  if (!resolution.valid) {
+    assert.equal(resolution.code, 'audio_reference_unsupported_model');
+  }
+});
+
 test('TEXT to SCRIPT and SCRIPT to STORYBOARD resolve through typed ports', () => {
   const textToScript = resolveConnectionPorts(node('text', '文本'), node('script', '脚本'), []);
   assert.equal(textToScript.valid, true);

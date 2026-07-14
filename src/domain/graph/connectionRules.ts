@@ -1,4 +1,5 @@
 import type { NodeData } from '../../types';
+import { isSeedanceVideoModel } from '../../utils/videoModelRouting.ts';
 import { getNodePort } from '../nodes/nodeRegistry.ts';
 import type {
   CanvasEdge,
@@ -151,6 +152,17 @@ export function resolveConnectionPorts(
       return resolved(sourceNode, 'text-output', targetNode, 'prompt-input');
     }
     return { valid: false, code: 'no_compatible_port', message: '文本只能连接到支持提示词输入的生成节点。' };
+  }
+
+  if (sourceType === '音频' && targetType === '视频') {
+    if (!isSeedanceVideoModel(targetNode.videoModel)) {
+      return {
+        valid: false,
+        code: 'audio_reference_unsupported_model',
+        message: '音频参考目前仅支持 Seedance 视频模型。'
+      };
+    }
+    return resolved(sourceNode, 'audio-output', targetNode, 'audio-reference');
   }
 
   if (IMAGE_NODE_TYPES.has(sourceType)) {

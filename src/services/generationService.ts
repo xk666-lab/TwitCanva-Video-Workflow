@@ -37,6 +37,7 @@ export interface GenerateVideoParams {
   duration?: number; // Video duration in seconds (e.g., 5, 6, 8, 10)
   videoModel?: string; // Video model version (e.g., 'veo-3.1', 'kling-v2-1')
   motionReferenceUrl?: string; // For Kling 2.6 motion control
+  audioReference?: string; // For Seedance audio-conditioned video generation
   subjectReferences?: SubjectReferenceSnapshot[];
   generateAudio?: boolean; // For Kling 2.6 and Veo 3.1 native audio (default: true)
   nodeId?: string; // ID of the node initiating generation

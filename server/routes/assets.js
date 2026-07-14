@@ -5,8 +5,37 @@ import crypto from 'crypto';
 
 const router = express.Router();
 
+const ASSET_TYPES = new Set(['images', 'videos', 'audio']);
+const AUDIO_MIME_EXTENSIONS = {
+    'audio/mpeg': 'mp3',
+    'audio/mp3': 'mp3',
+    'audio/wav': 'wav',
+    'audio/x-wav': 'wav',
+    'audio/mp4': 'm4a',
+    'audio/x-m4a': 'm4a',
+    'audio/aac': 'aac',
+    'audio/ogg': 'ogg',
+    'audio/webm': 'webm'
+};
+
 function assetDir(type, locals) {
-    return type === 'images' ? locals.IMAGES_DIR : locals.VIDEOS_DIR;
+    if (type === 'images') return locals.IMAGES_DIR;
+    if (type === 'videos') return locals.VIDEOS_DIR;
+    return locals.AUDIO_DIR;
+}
+
+function parseAudioDataUrl(data) {
+    if (typeof data !== 'string') return null;
+    const match = data.match(/^data:([^;,]+);base64,([A-Za-z0-9+/=\r\n]+)$/);
+    if (!match) return null;
+    const mimeType = match[1].toLowerCase();
+    const extension = AUDIO_MIME_EXTENSIONS[mimeType];
+    if (!extension) return { error: 'Unsupported audio MIME type' };
+    return {
+        mimeType,
+        extension,
+        buffer: Buffer.from(match[2], 'base64')
+    };
 }
 
 function resolveInside(rootDir, relativePath) {
@@ -20,25 +49,43 @@ router.post('/assets/:type', async (req, res) => {
         const { type } = req.params;
         const { data, prompt } = req.body;
 
-        if (!['images', 'videos'].includes(type)) {
+        if (!ASSET_TYPES.has(type)) {
             return res.status(400).json({ error: 'Invalid asset type' });
         }
 
         const targetDir = assetDir(type, req.app.locals);
         const id = crypto.randomUUID();
-        const ext = type === 'images' ? 'png' : 'mp4';
+        let ext = type === 'images' ? 'png' : 'mp4';
+        let content = null;
+        let mimeType;
+        if (type === 'audio') {
+            const parsed = parseAudioDataUrl(data);
+            if (!parsed || parsed.error) {
+                return res.status(400).json({ error: parsed?.error || 'Unsupported audio MIME type' });
+            }
+            ext = parsed.extension;
+            content = parsed.buffer;
+            mimeType = parsed.mimeType;
+        } else if (typeof data !== 'string') {
+            return res.status(400).json({ error: 'Asset data must be a base64 data URL' });
+        }
         const filename = `${id}.${ext}`;
         const metaFilename = `${id}.json`;
 
-        const base64Data = data.replace(/^data:[^;]+;base64,/, '');
-        fs.writeFileSync(path.join(targetDir, filename), base64Data, 'base64');
+        if (content) {
+            fs.writeFileSync(path.join(targetDir, filename), content);
+        } else {
+            const base64Data = data.replace(/^data:[^;]+;base64,/, '');
+            fs.writeFileSync(path.join(targetDir, filename), base64Data, 'base64');
+        }
 
         const metadata = {
             id,
             filename,
             prompt: prompt || '',
             createdAt: new Date().toISOString(),
-            type
+            type,
+            ...(mimeType ? { mimeType } : {})
         };
         fs.writeFileSync(path.join(targetDir, metaFilename), JSON.stringify(metadata, null, 2));
 
@@ -55,7 +102,7 @@ router.get('/assets/:type', async (req, res) => {
         const limit = parseInt(req.query.limit) || 0;
         const offset = parseInt(req.query.offset) || 0;
 
-        if (!['images', 'videos'].includes(type)) {
+        if (!ASSET_TYPES.has(type)) {
             return res.status(400).json({ error: 'Invalid asset type' });
         }
 
@@ -98,7 +145,7 @@ router.delete('/assets/:type/:id', async (req, res) => {
     try {
         const { type, id } = req.params;
 
-        if (!['images', 'videos'].includes(type)) {
+        if (!ASSET_TYPES.has(type)) {
             return res.status(400).json({ error: 'Invalid asset type' });
         }
 

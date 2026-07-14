@@ -12,15 +12,18 @@ import { createWorkflowData } from '../domain/workflow/workflowSchema';
 import { migrateWorkflow } from '../domain/workflow/migrateWorkflow';
 import type { CanvasEdge } from '../domain/graph/graphTypes';
 import { syncLegacyStoryboardContexts } from '../domain/storyboard/storyboardGraph';
+import type { TimelineDocument } from '../domain/timeline/timelineTypes.ts';
 
 interface UseWorkflowOptions {
     nodes: NodeData[];
     edges: CanvasEdge[];
     groups: NodeGroup[];
+    timeline: TimelineDocument;
     viewport: Viewport;
     canvasTitle: string;
     replaceGraph: (nodes: NodeData[], edges: CanvasEdge[]) => void;
     setGroups: Dispatch<SetStateAction<NodeGroup[]>>;
+    setTimeline: Dispatch<SetStateAction<TimelineDocument>>;
     setSelectedNodeIds: Dispatch<SetStateAction<string[]>>;
     setCanvasTitle: (title: string) => void;
     setEditingTitleValue: (value: string) => void;
@@ -31,10 +34,12 @@ export const useWorkflow = ({
     nodes,
     edges,
     groups,
+    timeline,
     viewport,
     canvasTitle,
     replaceGraph,
     setGroups,
+    setTimeline,
     setSelectedNodeIds,
     setCanvasTitle,
     setEditingTitleValue,
@@ -52,7 +57,8 @@ export const useWorkflow = ({
                 nodes,
                 edges,
                 groups: syncLegacyStoryboardContexts(nodes, groups),
-                viewport
+                viewport,
+                timeline
             });
 
             const result = await apiPost<{ id: string }>('/api/workflows', workflow);
@@ -61,7 +67,7 @@ export const useWorkflow = ({
         } catch (error) {
             console.error('Failed to save workflow:', error);
         }
-    }, [workflowId, canvasTitle, nodes, edges, groups, viewport]);
+    }, [workflowId, canvasTitle, nodes, edges, groups, viewport, timeline]);
 
     const handleLoadWorkflow = useCallback(async (id: string): Promise<{ nodeCount: number; title: string } | null> => {
         try {
@@ -80,6 +86,7 @@ export const useWorkflow = ({
             setEditingTitleValue(title);
             replaceGraph(workflow.nodes, workflow.edges);
             setGroups(workflow.groups || []);
+            setTimeline(workflow.timeline);
             setSelectedNodeIds([]);
             setIsWorkflowPanelOpen(false);
             console.log(isPublic ? 'Public workflow loaded:' : 'Workflow loaded:', targetWorkflowId);
@@ -92,7 +99,7 @@ export const useWorkflow = ({
             console.error('Failed to load workflow:', error);
         }
         return null;
-    }, [replaceGraph, setGroups, setSelectedNodeIds, setCanvasTitle, setEditingTitleValue]);
+    }, [replaceGraph, setGroups, setTimeline, setSelectedNodeIds, setCanvasTitle, setEditingTitleValue]);
 
     const handleWorkflowsClick = useCallback((e: React.MouseEvent) => {
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();

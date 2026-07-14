@@ -22,6 +22,7 @@ import {
     getConnectedImageInputs,
     getConnectedSubjectInputs,
     getConnectedTextInputs,
+    getAudioReferenceInput,
     getEndFrameInput,
     getMotionReferenceInput,
     getReferenceImageInputs,
@@ -180,6 +181,8 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
                 const subjectReferences = await getSubjectReferences(node);
                 const subjectReferenceUrls = getSubjectReferenceUrls(subjectReferences, 14);
                 const isSeedanceModel = isSeedanceVideoModel(node.videoModel);
+                const audioReferenceInput = getAudioReferenceInput(node, nodes, edges);
+                const audioReference = audioReferenceInput?.resultUrl;
                 const requestedDuration = isSeedanceModel ? undefined : node.videoDuration;
                 const referenceImageInputs = getReferenceImageInputs(node, nodes, edges);
                 const inputImageValue = (input?: NodeData): string | undefined => {
@@ -199,6 +202,16 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
                     : undefined;
                 const isMotionControl = Boolean(motionReferenceUrl);
                 const hasStartAndEndFrames = Boolean(startFrameInput && endFrameInput);
+
+                if (audioReference && !isSeedanceModel) {
+                    updateNode(id, {
+                        status: NodeStatus.ERROR,
+                        errorMessage: '音频参考目前仅支持 Seedance 视频模型。',
+                        lastTaskId: undefined,
+                        generationStartTime: undefined
+                    });
+                    return;
+                }
 
                 // Seedance uses reference images, not start/end interpolation frames.
                 const isFrameToFrame = !isSeedanceModel && !isMotionControl &&
@@ -232,6 +245,7 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
                     duration: requestedDuration,
                     videoModel: node.videoModel,
                     motionReferenceUrl,
+                    audioReference,
                     generateAudio: node.generateAudio, // For Kling 2.6 and Veo 3.1 native audio
                     nodeId: id,
                     ...(subjectReferences.length > 0 ? { subjectReferences } : {})

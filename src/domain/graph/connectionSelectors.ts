@@ -146,3 +146,18 @@ export function getConnectedVideoInput(
     ['视频', '视频编辑器', '本地视频模型'].includes(String(node.type))
   );
 }
+
+export function getAudioReferenceInput(
+  targetNode: NodeData,
+  nodes: NodeData[],
+  edges: CanvasEdge[]
+): NodeData | undefined {
+  if (String(targetNode.type) !== '视频') return undefined;
+  const incoming = getIncomingEdges(edges, targetNode.id);
+  if (incoming.length === 0) return undefined;
+
+  return sourceNodesForEdges(
+    getInputEdgesByPort(edges, targetNode.id, 'audio-reference').filter(edge => edge.dataType === 'audio'),
+    nodes
+  ).find(node => String(node.type) === '音频');
+}

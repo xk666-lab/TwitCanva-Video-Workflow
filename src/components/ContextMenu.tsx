@@ -220,7 +220,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           type="file"
           ref={fileInputRef}
           className="hidden"
-          accept="image/*,video/*"
+          accept="image/*,video/*,audio/*"
           onChange={handleFileChange}
         />
         <div className="p-1.5 flex flex-col gap-0.5">
@@ -349,6 +349,16 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           onClick={() => onSelectType(NodeType.VIDEO)}
           canvasTheme={canvasTheme}
         />
+
+        {!isConnector && (
+          <MenuItem
+            icon={<Music size={18} />}
+            label="音频"
+            desc="上传旁白、音乐或音效参考"
+            onClick={() => onSelectType(NodeType.AUDIO)}
+            canvasTheme={canvasTheme}
+          />
+        )}
 
         {!isConnector && (
           <MenuItem

@@ -122,14 +122,26 @@ const SUPPORTED_TASK_OPERATIONS = new Set([
 const SENSITIVE_TASK_INPUT_KEY = /(api.?key|authorization|access.?key|secret.?key|bearer.?token)/i;
 
 function persistTaskDataUrl(dataUrl, locals) {
-    const match = dataUrl.match(/^data:(image|video)\/(png|jpe?g|webp|gif|mp4|webm);base64,(.+)$/i);
+    const match = dataUrl.match(/^data:(image|video|audio)\/(png|jpe?g|webp|gif|mp4|webm|mpeg|mp3|wav|x-wav|m4a|x-m4a|aac|ogg);base64,(.+)$/i);
     if (!match) throw new TypeError('Unsupported task data URL type');
 
     const mediaType = match[1].toLowerCase();
-    const extension = match[2].toLowerCase() === 'jpeg' ? 'jpg' : match[2].toLowerCase();
+    const subtype = match[2].toLowerCase();
+    const extension = subtype === 'jpeg'
+        ? 'jpg'
+        : subtype === 'mpeg' || subtype === 'mp3'
+            ? 'mp3'
+            : mediaType === 'audio' && (subtype === 'mp4' || subtype === 'm4a' || subtype === 'x-m4a')
+                ? 'm4a'
+                : subtype;
     const buffer = Buffer.from(match[3], 'base64');
     const contentHash = crypto.createHash('sha256').update(buffer).digest('hex');
-    const targetDir = mediaType === 'video' ? locals.VIDEOS_DIR : locals.IMAGES_DIR;
+    const targetDir = mediaType === 'video'
+        ? locals.VIDEOS_DIR
+        : mediaType === 'audio'
+            ? locals.AUDIO_DIR
+            : locals.IMAGES_DIR;
+    if (!targetDir) throw new TypeError(`Missing local directory for ${mediaType} task input`);
     const filename = `task_input_${contentHash}.${extension}`;
     const targetPath = path.join(targetDir, filename);
     if (!fs.existsSync(targetPath)) fs.writeFileSync(targetPath, buffer);
@@ -599,7 +611,7 @@ async function executeImageGeneration(inputSnapshot, locals) {
 // ============================================================================
 
 async function executeVideoGeneration(inputSnapshot, locals) {
-        const { nodeId, generationTaskId, prompt, imageBase64: rawImageBase64, lastFrameBase64: rawLastFrameBase64, motionReferenceUrl: rawMotionReferenceUrl, aspectRatio, resolution, duration, videoModel } = inputSnapshot;
+        const { nodeId, generationTaskId, prompt, imageBase64: rawImageBase64, lastFrameBase64: rawLastFrameBase64, motionReferenceUrl: rawMotionReferenceUrl, audioReference: rawAudioReference, aspectRatio, resolution, duration, videoModel } = inputSnapshot;
         const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, HAILUO_API_KEY, SEEDANCE_API_KEY, SEEDANCE_BASE_URL, SEEDANCE_SUBMIT_PATH, SEEDANCE_STATUS_PATH, VIDEOS_DIR } = locals;
 
         // Resolve file URLs to base64. Seedance can receive multiple image references;
@@ -618,6 +630,9 @@ async function executeVideoGeneration(inputSnapshot, locals) {
         const isKlingModel = videoModel && videoModel.startsWith('kling-');
         const isHailuoModel = videoModel && videoModel.startsWith('hailuo-');
         const isSeedanceModel = isSeedanceVideoModel(videoModel);
+        if (rawAudioReference && !isSeedanceModel) {
+            throw new TypeError('Audio reference input is currently supported only by Seedance video models.');
+        }
 
         let videoBuffer;
 
@@ -740,6 +755,7 @@ async function executeVideoGeneration(inputSnapshot, locals) {
                 imageBase64: seedanceImageBase64Array.length > 0 ? seedanceImageBase64Array : imageBase64,
                 imageReference: rawImageInputs.length > 0 ? rawImageInputs : rawImageBase64,
                 videoReference: rawMotionReferenceUrl,
+                audioReference: rawAudioReference,
                 modelId: videoModel,
                 aspectRatio,
                 resolution,

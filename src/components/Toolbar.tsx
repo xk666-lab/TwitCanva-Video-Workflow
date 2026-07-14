@@ -7,7 +7,8 @@ import {
   Wrench,
   MoreHorizontal,
   Plus,
-  Film
+  Film,
+  ListMusic
 } from 'lucide-react';
 
 // ============================================================================
@@ -37,6 +38,7 @@ interface ToolbarProps {
   onAssetsClick?: (e: React.MouseEvent) => void;
   onTikTokClick?: (e: React.MouseEvent) => void;
   onStoryboardClick?: (e: React.MouseEvent) => void;
+  onTimelineClick?: (e: React.MouseEvent) => void;
   onToolsOpen?: () => void; // Called when tools dropdown opens to close other panels
   canvasTheme?: 'dark' | 'light';
 }
@@ -52,6 +54,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onAssetsClick,
   onTikTokClick,
   onStoryboardClick,
+  onTimelineClick,
   onToolsOpen,
   canvasTheme = 'dark'
 }) => {
@@ -153,6 +156,20 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 <div className="text-left">
                   <p className={`text-sm ${isDark ? 'text-neutral-200 group-hover:text-white' : 'text-neutral-700 group-hover:text-neutral-900'}`}>导入 TikTok</p>
                   <p className={`text-xs ${isDark ? 'text-neutral-500' : 'text-neutral-400'}`}>下载无水印视频</p>
+                </div>
+              </button>
+
+              <button
+                onClick={handleToolClick(onTimelineClick)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 transition-colors group ${isDark ? 'hover:bg-neutral-800' : 'hover:bg-neutral-100'
+                  }`}
+              >
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isDark ? 'bg-neutral-800' : 'bg-neutral-200'}`}>
+                  <ListMusic size={16} className={isDark ? 'text-white' : 'text-neutral-700'} />
+                </div>
+                <div className="text-left">
+                  <p className={`text-sm ${isDark ? 'text-neutral-200 group-hover:text-white' : 'text-neutral-700 group-hover:text-neutral-900'}`}>时间线</p>
+                  <p className={`text-xs ${isDark ? 'text-neutral-500' : 'text-neutral-400'}`}>编排音频和视频片段</p>
                 </div>
               </button>
 

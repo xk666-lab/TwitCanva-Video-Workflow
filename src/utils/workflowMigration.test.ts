@@ -25,6 +25,64 @@ test('new workflow payloads use the current schema version', () => {
 
   assert.equal(workflow.schemaVersion, CURRENT_WORKFLOW_SCHEMA_VERSION);
   assert.equal(workflow.title, 'New Workflow');
+  assert.deepEqual((workflow as unknown as Record<string, unknown>).timeline, {
+    schemaVersion: 1,
+    tracks: [
+      { id: 'video-main', kind: 'video', name: '视频轨', clips: [] },
+      { id: 'audio-main', kind: 'audio', name: '音频轨', clips: [] }
+    ]
+  });
+});
+
+test('workflow migration initializes and normalizes a separate timeline without losing unknown fields', () => {
+  const raw = {
+    id: 'legacy-timeline',
+    title: 'Timeline migration',
+    nodes: [],
+    edges: [],
+    groups: [],
+    viewport: { x: 0, y: 0, zoom: 1 },
+    timeline: {
+      schemaVersion: 1,
+      futureTimelineField: 'keep-me',
+      tracks: [{
+        id: 'audio-main',
+        kind: 'audio',
+        name: 42,
+        futureTrackField: true,
+        clips: [{
+          id: 'voice-clip',
+          mediaType: 'audio',
+          sourceNodeId: 'audio-node',
+          sourceUrl: '/library/audio/voice.mp3',
+          order: 3,
+          futureClipField: 'keep-me'
+        }]
+      }]
+    }
+  };
+
+  const migrated = migrateWorkflow(raw, { warn: () => undefined }) as unknown as Record<string, any>;
+
+  assert.deepEqual(migrated.timeline, {
+    schemaVersion: 1,
+    futureTimelineField: 'keep-me',
+    tracks: [{
+      id: 'audio-main',
+      kind: 'audio',
+      name: '音频轨',
+      futureTrackField: true,
+      clips: [{
+        id: 'voice-clip',
+        mediaType: 'audio',
+        sourceNodeId: 'audio-node',
+        sourceUrl: '/library/audio/voice.mp3',
+        order: 3,
+        futureClipField: 'keep-me'
+      }]
+    }]
+  });
+  assert.deepEqual(migrateWorkflow(migrated, { warn: () => undefined }), migrated);
 });
 
 test('task-aware workflows migrate to the current schema and preserve task references', () => {

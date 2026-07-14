@@ -78,6 +78,8 @@ function parseLibraryReference(rawReference, libraryDir) {
 
 function contentTypeForPath(filePath) {
     const ext = path.extname(filePath).toLowerCase();
+    const isAudioLibraryFile = /[\\/]audio[\\/]/i.test(String(filePath));
+    if (ext === '.webm' && isAudioLibraryFile) return 'audio/webm';
     return {
         '.png': 'image/png',
         '.jpg': 'image/jpeg',
@@ -89,7 +91,9 @@ function contentTypeForPath(filePath) {
         '.mov': 'video/quicktime',
         '.mp3': 'audio/mpeg',
         '.wav': 'audio/wav',
-        '.m4a': 'audio/mp4'
+        '.m4a': 'audio/mp4',
+        '.aac': 'audio/aac',
+        '.ogg': 'audio/ogg'
     }[ext] || 'application/octet-stream';
 }
 

@@ -6,7 +6,7 @@
  */
 
 import React, { useRef, useState, useEffect } from 'react';
-import { Loader2, Maximize2, ImageIcon as ImageIcon, Film, Upload, Pencil, Video, GripVertical, Download, Expand, Shrink, HardDrive } from 'lucide-react';
+import { Loader2, Maximize2, ImageIcon as ImageIcon, Film, Upload, Pencil, Video, GripVertical, Download, Expand, Shrink, HardDrive, Music2 } from 'lucide-react';
 import { NodeData, NodeStatus, NodeType } from '../../types';
 import { ScriptNodeContent } from './ScriptNodeContent';
 import { StoryboardNodeContent } from './StoryboardNodeContent';
@@ -21,6 +21,7 @@ interface NodeContentProps {
     isSuccess: boolean;
     getAspectRatioStyle: () => { aspectRatio: string };
     onUpload?: (nodeId: string, imageDataUrl: string) => void;
+    onAudioUpload?: (nodeId: string, audioDataUrl: string, fileName?: string) => void | Promise<void>;
     onExpand?: (imageUrl: string) => void;
     onDragStart?: (nodeId: string, hasContent: boolean) => void;
     onDragEnd?: () => void;
@@ -49,6 +50,7 @@ export const NodeContent: React.FC<NodeContentProps> = ({
     isSuccess,
     getAspectRatioStyle,
     onUpload,
+    onAudioUpload,
     onExpand,
     onDragStart,
     onDragEnd,
@@ -64,6 +66,7 @@ export const NodeContent: React.FC<NodeContentProps> = ({
     onRetryStoryTask
 }) => {
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const audioInputRef = useRef<HTMLInputElement>(null);
 
     // Local state for text node textarea to prevent lag
     const [localPrompt, setLocalPrompt] = useState(data.prompt || '');
@@ -76,6 +79,7 @@ export const NodeContent: React.FC<NodeContentProps> = ({
     const isVideoType = data.type === NodeType.VIDEO || data.type === NodeType.LOCAL_VIDEO_MODEL;
     // Helper: Check if node is local model
     const isLocalModel = data.type === NodeType.LOCAL_IMAGE_MODEL || data.type === NodeType.LOCAL_VIDEO_MODEL;
+    const isAudioType = data.type === NodeType.AUDIO;
 
     // Sync local state ONLY when data.prompt changes externally (not from our own update)
     useEffect(() => {
@@ -118,6 +122,17 @@ export const NodeContent: React.FC<NodeContentProps> = ({
         reader.readAsDataURL(file);
     };
 
+    const handleAudioFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !onAudioUpload) return;
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            void onAudioUpload(data.id, reader.result as string, file.name);
+        };
+        reader.readAsDataURL(file);
+        e.target.value = '';
+    };
+
     if (data.type === NodeType.SCRIPT) {
         return (
             <ScriptNodeContent
@@ -142,6 +157,65 @@ export const NodeContent: React.FC<NodeContentProps> = ({
 
     if (data.type === NodeType.SUBJECT) {
         return <SubjectNodeContent data={data} onUpdate={onUpdate} />;
+    }
+
+    if (isAudioType) {
+        return (
+            <div className={`transition-all duration-200 ${!selected ? 'p-0 rounded-2xl overflow-hidden' : 'p-1'}`}>
+                <input
+                    ref={audioInputRef}
+                    type="file"
+                    accept="audio/mpeg,audio/wav,audio/mp4,audio/aac,audio/ogg,audio/webm"
+                    className="hidden"
+                    onChange={handleAudioFileChange}
+                />
+                <div className={`relative min-h-44 bg-[#141414] p-5 flex flex-col justify-center gap-4 ${!selected ? 'rounded-2xl' : 'rounded-xl border border-dashed border-neutral-800'}`}>
+                    {data.resultUrl ? (
+                        <>
+                            <div className="flex items-center gap-3 text-neutral-200">
+                                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 text-emerald-300 flex items-center justify-center">
+                                    <Music2 size={20} />
+                                </div>
+                                <div className="min-w-0">
+                                    <p className="text-sm font-medium truncate">{data.title || data.prompt || '音频素材'}</p>
+                                    <p className="text-xs text-neutral-500">可作为 Seedance 音频参考</p>
+                                </div>
+                            </div>
+                            <audio src={data.resultUrl} controls className="w-full" />
+                            <button
+                                onClick={() => audioInputRef.current?.click()}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                className="self-start text-xs text-neutral-400 hover:text-white transition-colors"
+                            >
+                                替换音频
+                            </button>
+                        </>
+                    ) : isLoading ? (
+                        <div className="flex flex-col items-center gap-2 text-neutral-500">
+                            <Loader2 size={30} className="animate-spin text-emerald-400" />
+                            <span className="text-xs">正在上传音频...</span>
+                        </div>
+                    ) : (
+                        <div className="flex flex-col items-center gap-3 text-center">
+                            <div className="text-neutral-700"><Music2 size={42} /></div>
+                            <div>
+                                <p className="text-sm font-medium text-neutral-400">上传音频</p>
+                                <p className="mt-1 text-xs text-neutral-600">MP3、WAV、M4A、AAC、OGG 或 WebM</p>
+                            </div>
+                            <button
+                                onClick={() => audioInputRef.current?.click()}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                className="flex items-center gap-2 px-4 py-2 bg-neutral-800/80 hover:bg-neutral-700 rounded-lg text-white text-sm font-medium transition-colors"
+                            >
+                                <Upload size={16} />
+                                选择音频
+                            </button>
+                            {data.errorMessage && <p className="text-xs text-red-300">{data.errorMessage}</p>}
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
     }
 
     return (

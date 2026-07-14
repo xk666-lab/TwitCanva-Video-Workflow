@@ -45,8 +45,10 @@ async function startTestServer(manager, libraryDir) {
     app.locals.LIBRARY_DIR = libraryDir;
     app.locals.IMAGES_DIR = path.join(libraryDir, 'images');
     app.locals.VIDEOS_DIR = path.join(libraryDir, 'videos');
+    app.locals.AUDIO_DIR = path.join(libraryDir, 'audio');
     fs.mkdirSync(app.locals.IMAGES_DIR, { recursive: true });
     fs.mkdirSync(app.locals.VIDEOS_DIR, { recursive: true });
+    fs.mkdirSync(app.locals.AUDIO_DIR, { recursive: true });
     app.use('/api', generationRoutes);
 
     const server = await new Promise(resolve => {
@@ -101,6 +103,134 @@ function createStoryPackageSnapshot(overrides = {}) {
         ...overrides
     };
 }
+
+test('POST generation-tasks materializes audio references into the local audio library', async t => {
+    const libraryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'twitcanva-audio-task-route-'));
+    t.after(() => fs.rmSync(libraryDir, { recursive: true, force: true }));
+    let receivedSubmission;
+    const server = await startTestServer({
+        async submitTask(submission) {
+            receivedSubmission = submission;
+            return { task: createTask({
+                operation: submission.operation,
+                provider: submission.provider,
+                model: submission.model,
+                inputSnapshot: submission.inputSnapshot
+            }), reused: false };
+        }
+    }, libraryDir);
+    t.after(server.close);
+
+    const response = await fetch(`${server.baseUrl}/api/generation-tasks`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            nodeId: 'video-node',
+            operation: 'generate-video',
+            inputSnapshot: {
+                nodeId: 'video-node',
+                prompt: 'A paper bird speaks.',
+                videoModel: 'bytedance/seedance-2.0/text-to-video',
+                audioReference: 'data:audio/mpeg;base64,SUQz'
+            }
+        })
+    });
+
+    assert.equal(response.status, 202);
+    assert.match(receivedSubmission.inputSnapshot.audioReference, /^\/library\/audio\/task_input_[a-f0-9]+\.mp3$/);
+    const savedInput = path.join(libraryDir, receivedSubmission.inputSnapshot.audioReference.replace('/library/', ''));
+    assert.equal(fs.existsSync(savedInput), true);
+});
+
+test('POST generation-tasks preserves audio/mp4 task inputs as M4A references', async t => {
+    const libraryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'twitcanva-m4a-task-route-'));
+    t.after(() => fs.rmSync(libraryDir, { recursive: true, force: true }));
+    let receivedSubmission;
+    const server = await startTestServer({
+        async submitTask(submission) {
+            receivedSubmission = submission;
+            return { task: createTask({
+                operation: submission.operation,
+                provider: submission.provider,
+                model: submission.model,
+                inputSnapshot: submission.inputSnapshot
+            }), reused: false };
+        }
+    }, libraryDir);
+    t.after(server.close);
+
+    const response = await fetch(`${server.baseUrl}/api/generation-tasks`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            nodeId: 'video-node',
+            operation: 'generate-video',
+            inputSnapshot: {
+                nodeId: 'video-node',
+                prompt: 'A paper bird speaks.',
+                videoModel: 'bytedance/seedance-2.0/text-to-video',
+                audioReference: 'data:audio/mp4;base64,QUJD'
+            }
+        })
+    });
+
+    assert.equal(response.status, 202);
+    assert.match(receivedSubmission.inputSnapshot.audioReference, /^\/library\/audio\/task_input_[a-f0-9]+\.m4a$/);
+});
+
+test('the Seedance task executor forwards audio references without contacting a real provider', async t => {
+    const originalFetch = globalThis.fetch;
+    const originalPublicBase = process.env.SEEDANCE_PUBLIC_ASSET_BASE_URL;
+    const libraryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'twitcanva-seedance-audio-'));
+    const videosDir = path.join(libraryDir, 'videos');
+    fs.mkdirSync(videosDir, { recursive: true });
+    t.after(() => {
+        globalThis.fetch = originalFetch;
+        fs.rmSync(libraryDir, { recursive: true, force: true });
+        if (originalPublicBase === undefined) delete process.env.SEEDANCE_PUBLIC_ASSET_BASE_URL;
+        else process.env.SEEDANCE_PUBLIC_ASSET_BASE_URL = originalPublicBase;
+    });
+
+    process.env.SEEDANCE_PUBLIC_ASSET_BASE_URL = 'https://assets.example.com';
+    let submittedBody;
+    globalThis.fetch = async (url, options = {}) => {
+        if (options.method === 'POST') {
+            submittedBody = JSON.parse(options.body);
+            return new Response(JSON.stringify({ video_url: 'https://cdn.example.com/result.mp4' }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' }
+            });
+        }
+        if (String(url) === 'https://cdn.example.com/result.mp4') {
+            return new Response(Buffer.from('video-result'), { status: 200 });
+        }
+        throw new Error(`Unexpected fetch: ${String(url)}`);
+    };
+
+    const executor = createGenerationTaskExecutor({
+        SEEDANCE_API_KEY: 'test-key',
+        SEEDANCE_BASE_URL: 'https://seedance.example.com',
+        LIBRARY_DIR: libraryDir,
+        VIDEOS_DIR: videosDir
+    });
+    const output = await executor(createTask({
+        taskId: 'seedance-audio-task',
+        operation: 'generate-video',
+        provider: 'seedance',
+        model: 'bytedance/seedance-2.0/text-to-video',
+        inputSnapshot: {
+            nodeId: 'video-node',
+            prompt: 'A paper bird speaks.',
+            videoModel: 'bytedance/seedance-2.0/text-to-video',
+            audioReference: '/library/audio/voice.mp3'
+        }
+    }));
+
+    assert.equal(output.resultUrl.startsWith('/library/videos/'), true);
+    assert.deepEqual(submittedBody.metadata.reference_audios, [
+        'https://assets.example.com/library/audio/voice.mp3'
+    ]);
+});
 
 test('POST generation-tasks validates operation before calling the manager', async t => {
     const libraryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'twitcanva-task-route-'));

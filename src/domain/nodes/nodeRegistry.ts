@@ -113,6 +113,7 @@ const definitions: NodeDefinition[] = [
       { id: 'reference-images', label: '参考图', direction: 'input', dataType: 'image', multiple: true, maxConnections: 14, ordered: true, role: 'reference' },
       { id: 'subject-references', label: '主体参考', direction: 'input', dataType: 'subject', multiple: true, enabled: true, role: 'subject-reference' },
       { id: 'motion-reference', label: '动作参考', direction: 'input', dataType: 'video', maxConnections: 1, role: 'motion-reference' },
+      { id: 'audio-reference', label: '音频参考', direction: 'input', dataType: 'audio', maxConnections: 1, role: 'audio-reference' },
       { id: 'video-output', label: '视频', direction: 'output', dataType: 'video', multiple: true, role: 'video' },
       { id: 'last-frame-output', label: '末帧', direction: 'output', dataType: 'image', multiple: true, role: 'last-frame' }
     ]
@@ -123,12 +124,12 @@ const definitions: NodeDefinition[] = [
     icon: 'audio',
     category: 'input',
     description: '预留的音频节点类型',
-    defaultData: genericDefaults,
-    capabilities: {},
+    defaultData: () => ({ ...genericDefaults(), model: 'local-audio' }),
+    capabilities: { supportsUpload: true },
     ports: [
       { id: 'text-input', label: '文本', direction: 'input', dataType: 'text', enabled: false },
       { id: 'reference-audio', label: '参考音频', direction: 'input', dataType: 'audio', multiple: true, enabled: false },
-      { id: 'audio-output', label: '音频', direction: 'output', dataType: 'audio', multiple: true, enabled: false }
+      { id: 'audio-output', label: '音频', direction: 'output', dataType: 'audio', multiple: true, enabled: true, role: 'audio' }
     ]
   },
   {

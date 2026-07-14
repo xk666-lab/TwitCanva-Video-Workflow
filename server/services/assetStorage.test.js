@@ -47,6 +47,35 @@ test('uploads local library references to S3-compatible storage and returns publ
     }
 });
 
+test('uploads audio WebM references with an audio MIME type', async () => {
+    const { root, libraryDir } = makeTempLibrary();
+    const audioDir = path.join(libraryDir, 'audio');
+    fs.mkdirSync(audioDir, { recursive: true });
+    fs.writeFileSync(path.join(audioDir, 'voice.webm'), Buffer.from('WEBM-AUDIO'));
+    const putCalls = [];
+
+    try {
+        const urls = await makePublicAssetUrls(['/library/audio/voice.webm'], {
+            libraryDir,
+            env: {
+                ASSET_STORAGE_DRIVER: 's3',
+                ASSET_S3_BUCKET: 'twitcanva-test',
+                ASSET_S3_ACCESS_KEY_ID: 'test-access-key',
+                ASSET_S3_SECRET_ACCESS_KEY: 'test-secret-key',
+                ASSET_S3_PUBLIC_BASE_URL: 'https://cdn.example.com/public'
+            },
+            putObject: async object => {
+                putCalls.push(object);
+            }
+        });
+
+        assert.deepEqual(urls, ['https://cdn.example.com/public/twitcanva/library/audio/voice.webm']);
+        assert.equal(putCalls[0].contentType, 'audio/webm');
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test('keeps existing public HTTP references without uploading', async () => {
     const putCalls = [];
 

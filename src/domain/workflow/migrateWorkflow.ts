@@ -17,6 +17,7 @@ import {
   LEGACY_WORKFLOW_SCHEMA_VERSION,
   type WorkflowData
 } from './workflowSchema.ts';
+import { normalizeTimelineDocument } from '../timeline/timelineDocument.ts';
 
 export interface WorkflowMigrationOptions {
   warn?: (message: string) => void;
@@ -198,6 +199,7 @@ export function migrateWorkflow(
     groups: Array.isArray(raw.groups)
       ? raw.groups.map((group, index) => migrateGroup(group, index))
       : [],
-    viewport: migrateViewport(raw.viewport)
+    viewport: migrateViewport(raw.viewport),
+    timeline: normalizeTimelineDocument(raw.timeline)
   };
 }

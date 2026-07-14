@@ -28,9 +28,16 @@ test('core generation nodes expose the expected typed ports', () => {
   assert.equal(getNodePort('视频', 'last-frame-output')?.dataType, 'image');
 });
 
-test('audio ports are defined but disabled for this phase', () => {
-  assert.ok(getInputPorts('音频').every(port => port.enabled === false));
-  assert.ok(getOutputPorts('音频').every(port => port.enabled === false));
+test('audio nodes expose an active output and videos expose an audio reference input', () => {
+  const audioOutput = getNodePort('音频', 'audio-output');
+  const videoAudioReference = getNodePort('视频', 'audio-reference');
+
+  assert.equal(audioOutput?.direction, 'output');
+  assert.equal(audioOutput?.dataType, 'audio');
+  assert.notEqual(audioOutput?.enabled, false);
+  assert.equal(videoAudioReference?.direction, 'input');
+  assert.equal(videoAudioReference?.dataType, 'audio');
+  assert.equal(videoAudioReference?.maxConnections, 1);
 });
 
 test('script and storyboard expose active typed ports', () => {

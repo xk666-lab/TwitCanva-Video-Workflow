@@ -5,6 +5,18 @@ import crypto from 'crypto';
 
 const router = express.Router();
 
+const AUDIO_MIME_EXTENSIONS = {
+    'audio/mpeg': 'mp3',
+    'audio/mp3': 'mp3',
+    'audio/wav': 'wav',
+    'audio/x-wav': 'wav',
+    'audio/mp4': 'm4a',
+    'audio/x-m4a': 'm4a',
+    'audio/aac': 'aac',
+    'audio/ogg': 'ogg',
+    'audio/webm': 'webm'
+};
+
 function isSafeId(id) {
     return typeof id === 'string' && /^[a-zA-Z0-9_-]+$/.test(id);
 }
@@ -32,6 +44,14 @@ function saveBase64ToFile(dataUrl, dirs) {
         return { url: `/library/videos/${filename}` };
     }
 
+    if (mimeType.startsWith('audio/')) {
+        const extension = AUDIO_MIME_EXTENSIONS[mimeType.toLowerCase()];
+        if (!extension || !dirs.AUDIO_DIR) return null;
+        const filename = `${id}.${extension}`;
+        fs.writeFileSync(path.join(dirs.AUDIO_DIR, filename), buffer);
+        return { url: `/library/audio/${filename}` };
+    }
+
     const ext = mimeType === 'image/jpeg' ? 'jpg' : 'png';
     const filename = `${id}.${ext}`;
     fs.writeFileSync(path.join(dirs.IMAGES_DIR, filename), buffer);
@@ -56,7 +76,7 @@ function sanitizeWorkflowNodes(nodes, dirs) {
 router.post('/workflows', async (req, res) => {
     try {
         const workflow = req.body;
-        const { WORKFLOWS_DIR, IMAGES_DIR, VIDEOS_DIR } = req.app.locals;
+        const { WORKFLOWS_DIR, IMAGES_DIR, VIDEOS_DIR, AUDIO_DIR } = req.app.locals;
 
         if (!workflow.id) workflow.id = crypto.randomUUID();
         if (!isSafeId(workflow.id)) {
@@ -77,7 +97,7 @@ router.post('/workflows', async (req, res) => {
         }
 
         if (workflow.nodes) {
-            workflow.nodes = sanitizeWorkflowNodes(workflow.nodes, { IMAGES_DIR, VIDEOS_DIR });
+            workflow.nodes = sanitizeWorkflowNodes(workflow.nodes, { IMAGES_DIR, VIDEOS_DIR, AUDIO_DIR });
         }
 
         fs.writeFileSync(filePath, JSON.stringify(workflow, null, 2));

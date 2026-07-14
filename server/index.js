@@ -43,12 +43,13 @@ const WORKFLOWS_DIR = path.join(LIBRARY_DIR, 'workflows');
 const WORKFLOW_TEMPLATES_DIR = path.join(LIBRARY_DIR, 'templates');
 const IMAGES_DIR = path.join(LIBRARY_DIR, 'images');
 const VIDEOS_DIR = path.join(LIBRARY_DIR, 'videos');
+const AUDIO_DIR = path.join(LIBRARY_DIR, 'audio');
 const CHATS_DIR = path.join(LIBRARY_DIR, 'chats');
 const LIBRARY_ASSETS_DIR = path.join(LIBRARY_DIR, 'assets');
 const SERVER_DATA_DIR = path.join(__dirname, '..', '.twitcanva');
 const TASKS_DIR = path.join(SERVER_DATA_DIR, 'tasks');
 
-[LIBRARY_DIR, WORKFLOWS_DIR, WORKFLOW_TEMPLATES_DIR, IMAGES_DIR, VIDEOS_DIR, CHATS_DIR, LIBRARY_ASSETS_DIR, TASKS_DIR].forEach(dir => {
+[LIBRARY_DIR, WORKFLOWS_DIR, WORKFLOW_TEMPLATES_DIR, IMAGES_DIR, VIDEOS_DIR, AUDIO_DIR, CHATS_DIR, LIBRARY_ASSETS_DIR, TASKS_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
@@ -151,6 +152,7 @@ app.locals.SEEDANCE_STATUS_PATH = SEEDANCE_STATUS_PATH;
 app.locals.FAL_API_KEY = FAL_API_KEY;
 app.locals.IMAGES_DIR = IMAGES_DIR;
 app.locals.VIDEOS_DIR = VIDEOS_DIR;
+app.locals.AUDIO_DIR = AUDIO_DIR;
 app.locals.LIBRARY_DIR = LIBRARY_DIR;
 app.locals.WORKFLOWS_DIR = WORKFLOWS_DIR;
 app.locals.WORKFLOW_TEMPLATES_DIR = WORKFLOW_TEMPLATES_DIR;

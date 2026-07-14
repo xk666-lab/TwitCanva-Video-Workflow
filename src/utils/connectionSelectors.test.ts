@@ -8,6 +8,7 @@ import {
   getConnectedImageInputs,
   getConnectedSubjectInputs,
   getConnectedTextInputs,
+  getAudioReferenceInput,
   getEndFrameInput,
   getStartFrameInput
 } from '../domain/graph/connectionSelectors.ts';
@@ -66,6 +67,17 @@ test('video generation resolves start and end frames from typed edges', () => {
 
   assert.equal(getStartFrameInput(nodes[2], nodes, edges)?.id, 'start');
   assert.equal(getEndFrameInput(nodes[2], nodes, edges)?.id, 'end');
+});
+
+test('audio reference selection is explicit to video nodes and ignores malformed targets', () => {
+  const nodes = [node('audio', '音频', { resultUrl: '/library/audio/voice.mp3' }), node('video', '视频')];
+  const audioEdge = edge('audio-edge', 'audio', 'audio-output', 'video', 'audio-reference', 'audio');
+
+  assert.equal(getAudioReferenceInput(nodes[1], nodes, [audioEdge])?.id, 'audio');
+
+  const malformedTarget = node('image', '图片');
+  const malformedEdge = edge('malformed-audio-edge', 'audio', 'audio-output', 'image', 'audio-reference', 'audio');
+  assert.equal(getAudioReferenceInput(malformedTarget, [nodes[0], malformedTarget], [malformedEdge]), undefined);
 });
 
 test('selectors fall back to parentIds and frameInputs when edges are absent', () => {

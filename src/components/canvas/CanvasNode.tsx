@@ -33,6 +33,8 @@ interface CanvasNodeProps {
   isHoveredForConnection?: boolean;
   onOpenEditor?: (nodeId: string) => void;
   onUpload?: (nodeId: string, imageDataUrl: string) => void;
+  onAudioUpload?: (nodeId: string, audioDataUrl: string, fileName?: string) => void | Promise<void>;
+  onAddToTimeline?: (nodeId: string) => void;
   onExpand?: (imageUrl: string) => void;
   onDragStart?: (nodeId: string, hasContent: boolean) => void;
   onDragEnd?: () => void;
@@ -76,6 +78,8 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
   isHoveredForConnection,
   onOpenEditor,
   onUpload,
+  onAudioUpload,
+  onAddToTimeline,
   onExpand,
   onDragStart,
   onDragEnd,
@@ -769,6 +773,17 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
                   <line x1="3" y1="21" x2="10" y2="14" />
                 </svg>
               </button>
+              <button
+                onClick={(event) => { event.stopPropagation(); onAddToTimeline?.(data.id); }}
+                onPointerDown={(event) => event.stopPropagation()}
+                className="p-1.5 text-neutral-300 hover:bg-neutral-700 hover:text-white rounded-full transition-colors"
+                title="添加到时间线"
+              >
+                <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M4 6h16M4 12h10M4 18h16" />
+                  <path d="M17 10v4M15 12h4" />
+                </svg>
+              </button>
               {/* Post to X Button */}
               <button
                 onClick={(e) => { e.stopPropagation(); onPostToX?.(data.id, data.resultUrl!, 'video'); }}
@@ -861,6 +876,28 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
           </div>
         )}
 
+        {data.type === NodeType.AUDIO && isSuccess && data.resultUrl && (
+          <div
+            className="absolute -top-12 left-0 right-0 flex justify-center opacity-0 group-hover/nodecard:opacity-100 transition-opacity z-20"
+            style={{
+              transform: `scale(${localScale})`,
+              transformOrigin: 'bottom center'
+            }}
+          >
+            <button
+              onClick={(event) => { event.stopPropagation(); onAddToTimeline?.(data.id); }}
+              onPointerDown={(event) => event.stopPropagation()}
+              className="flex items-center gap-1.5 rounded-full border border-neutral-700 bg-neutral-900/95 px-3 py-1.5 text-xs font-medium text-neutral-200 shadow-xl backdrop-blur-md transition-colors hover:bg-neutral-700 hover:text-white"
+            >
+              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M4 6h16M4 12h10M4 18h16" />
+                <path d="M17 10v4M15 12h4" />
+              </svg>
+              加入时间线
+            </button>
+          </div>
+        )}
+
         {/* Main Node Card - Video nodes are wider to fit more controls */}
         <div
           className={`relative ${data.type === NodeType.VIDEO ? 'w-[385px]' : 'w-[365px]'} rounded-2xl border transition-all duration-300 flex flex-col shadow-2xl ${isDark ? 'bg-[#0f0f0f]' : 'bg-white'} ${selected ? 'border-blue-500/50 ring-1 ring-blue-500/30' : isDark ? 'border-neutral-800' : 'border-neutral-200'}`}
@@ -910,6 +947,7 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
             isSuccess={isSuccess}
             getAspectRatioStyle={getAspectRatioStyle}
             onUpload={onUpload}
+            onAudioUpload={onAudioUpload}
             onExpand={onExpand}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
@@ -928,7 +966,7 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
 
         {/* Control Panel - Only show when single node is selected (not in group selection) */}
         {/* Hide controls for storyboard-generated scenes */}
-        {selected && showControls && data.type !== NodeType.TEXT && data.type !== NodeType.SUBJECT && data.type !== NodeType.SCRIPT && data.type !== NodeType.STORYBOARD && !(data.prompt && data.prompt.startsWith('Extract panel #')) && (
+        {selected && showControls && data.type !== NodeType.TEXT && data.type !== NodeType.AUDIO && data.type !== NodeType.SUBJECT && data.type !== NodeType.SCRIPT && data.type !== NodeType.STORYBOARD && !(data.prompt && data.prompt.startsWith('Extract panel #')) && (
           <div className="absolute top-[calc(100%+12px)] left-1/2 -translate-x-1/2 w-[600px] flex justify-center z-[100]">
             <NodeControls
               data={data}

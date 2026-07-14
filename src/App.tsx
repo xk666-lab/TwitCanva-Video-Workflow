@@ -36,7 +36,10 @@ import { useContextMenuHandlers } from './hooks/useContextMenuHandlers';
 import { useAutoSave } from './hooks/useAutoSave';
 import { useGenerationRecovery } from './hooks/useGenerationRecovery';
 import { useVideoFrameExtraction } from './hooks/useVideoFrameExtraction';
+import { useTimeline } from './hooks/useTimeline';
 import { createDefaultNodeData } from './domain/nodes/nodeRegistry';
+import { createEmptyTimelineDocument } from './domain/timeline/timelineDocument';
+import type { TimelineDocument } from './domain/timeline/timelineTypes';
 import { extractVideoLastFrame } from './utils/videoHelpers';
 import { SelectionBoundingBox } from './components/canvas/SelectionBoundingBox';
 import { WorkflowPanel } from './components/WorkflowPanel';
@@ -51,6 +54,7 @@ import { TwitterPostModal } from './components/modals/TwitterPostModal';
 import { TikTokPostModal } from './components/modals/TikTokPostModal';
 import { WorkflowTemplateSaveModal } from './components/modals/WorkflowTemplateSaveModal';
 import { AssetLibraryPanel } from './components/AssetLibraryPanel';
+import { TimelinePanel } from './components/timeline/TimelinePanel';
 import { useTikTokImport } from './hooks/useTikTokImport';
 import { useStoryboardGenerator } from './hooks/useStoryboardGenerator';
 import { StoryboardGeneratorModal } from './components/modals/StoryboardGeneratorModal';
@@ -195,6 +199,16 @@ export default function App() {
     renameGroup
   } = useGroupManagement();
 
+  const [timeline, setTimeline] = useState<TimelineDocument>(() => createEmptyTimelineDocument());
+  const {
+    isTimelineOpen,
+    closeTimeline,
+    toggleTimeline,
+    addNodeResultToTimeline,
+    moveClip: moveTimelineClip,
+    removeClip: removeTimelineClip
+  } = useTimeline({ nodes, timeline, setTimeline });
+
   // History for undo/redo
   const {
     present: historyState,
@@ -203,7 +217,7 @@ export default function App() {
     pushHistory,
     canUndo,
     canRedo
-  } = useHistory({ nodes, edges, groups }, 50);
+  } = useHistory({ nodes, edges, groups, timeline }, 50);
 
   // Workflow management
   const {
@@ -219,16 +233,19 @@ export default function App() {
     nodes,
     edges,
     groups,
+    timeline,
     viewport,
     canvasTitle,
     replaceGraph,
     setGroups,
+    setTimeline,
     setSelectedNodeIds,
     setCanvasTitle,
     setEditingTitleValue,
     onPanelOpen: () => {
       closeHistoryPanel();
       closeAssetLibrary();
+      closeTimeline();
     }
   });
 
@@ -273,7 +290,7 @@ export default function App() {
       handleSaveWithTracking();
     }
     lastActiveTaskIdsRef.current = currentActiveTaskIds;
-  }, [nodes, edges, canvasTitle]);
+  }, [nodes, edges, canvasTitle, timeline]);
 
   // Update saved state after workflow save
   const handleSaveWithTracking = async () => {
@@ -378,6 +395,7 @@ export default function App() {
     setNodes([]);
     setSelectedEdgeId(null);
     setGroups([]); // Reset groups for new canvas
+    setTimeline(createEmptyTimelineDocument());
     setSelectedNodeIds([]);
     setCanvasTitle('未命名画布');
     setEditingTitleValue('未命名画布');
@@ -437,6 +455,7 @@ export default function App() {
     handleOpenCreateAsset,
     handleSaveAssetToLibrary,
     handleSaveSubjectAsset,
+    handleAudioNodeUpload,
     handleContextUpload
   } = useAssetHandlers({ nodes, viewport, contextMenu, setNodes });
 
@@ -946,9 +965,9 @@ export default function App() {
       return;
     }
 
-    // Push graph state to history when nodes, edges, or groups change
-    pushHistory({ nodes, edges, groups });
-  }, [nodes, edges, groups, isDragging, pushHistory]);
+    // Push graph state to history when nodes, edges, groups, or timeline change
+    pushHistory({ nodes, edges, groups, timeline });
+  }, [nodes, edges, groups, timeline, isDragging, pushHistory]);
 
   // Apply history state when undo/redo is triggered
   // IMPORTANT: Don't revert nodes if any node is in LOADING status (generation in progress)
@@ -959,12 +978,13 @@ export default function App() {
       return;
     }
 
-    if (historyState.nodes !== nodes || historyState.edges !== edges || historyState.groups !== groups) {
+    if (historyState.nodes !== nodes || historyState.edges !== edges || historyState.groups !== groups || historyState.timeline !== timeline) {
       isApplyingHistory.current = true;
       replaceGraph(historyState.nodes, historyState.edges);
       setGroups(historyState.groups);
+      setTimeline(historyState.timeline);
     }
-  }, [historyState, nodes, edges, groups, replaceGraph, setGroups]);
+  }, [historyState, nodes, edges, groups, timeline, replaceGraph, setGroups]);
 
   // Simple wrapper for updateNode (sync code removed - TEXT node prompts are combined at generation time)
   const updateNodeWithSync = React.useCallback((id: string, updates: Partial<NodeData>) => {
@@ -1067,10 +1087,12 @@ export default function App() {
           onAssetsClick={handleAssetsClick}
           onTikTokClick={openTikTokModal}
           onStoryboardClick={storyboardGenerator.openModal}
+          onTimelineClick={toggleTimeline}
           onToolsOpen={() => {
             closeWorkflowPanel();
             closeHistoryPanel();
             closeAssetLibrary();
+            closeTimeline();
           }}
           canvasTheme={canvasTheme}
         />
@@ -1104,6 +1126,15 @@ export default function App() {
         onSelectAsset={handleLibrarySelect}
         panelY={assetLibraryY}
         variant={assetLibraryVariant}
+        canvasTheme={canvasTheme}
+      />
+
+      <TimelinePanel
+        isOpen={isTimelineOpen}
+        timeline={timeline}
+        onClose={closeTimeline}
+        onMoveClip={moveTimelineClip}
+        onRemoveClip={removeTimelineClip}
         canvasTheme={canvasTheme}
       />
 
@@ -1319,6 +1350,8 @@ export default function App() {
                 isHoveredForConnection={connectionHoveredNodeId === node.id}
                 onOpenEditor={handleOpenEditor}
                 onUpload={handleUpload}
+                onAudioUpload={handleAudioNodeUpload}
+                onAddToTimeline={addNodeResultToTimeline}
                 onExpand={handleExpandImage}
                 onDragStart={handleNodeDragStart}
                 onDragEnd={handleNodeDragEnd}

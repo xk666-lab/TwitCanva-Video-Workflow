@@ -208,6 +208,41 @@ export const useAssetHandlers = ({
         }
     }, [nodeToSnapshot]);
 
+    const handleAudioNodeUpload = useCallback(async (nodeId: string, audioDataUrl: string, fileName?: string) => {
+        const node = nodes.find(candidate => candidate.id === nodeId);
+        if (!node || node.type !== NodeType.AUDIO) return;
+
+        setNodes(previous => previous.map(candidate => candidate.id === nodeId
+            ? {
+                ...candidate,
+                status: NodeStatus.LOADING,
+                errorMessage: undefined
+            }
+            : candidate));
+
+        try {
+            const resultUrl = await uploadAsset(audioDataUrl, 'audio', fileName || node.prompt);
+            setNodes(previous => previous.map(candidate => candidate.id === nodeId
+                ? {
+                    ...candidate,
+                    status: NodeStatus.SUCCESS,
+                    resultUrl,
+                    prompt: fileName || candidate.prompt,
+                    errorMessage: undefined
+                }
+                : candidate));
+        } catch (error) {
+            console.error('Audio upload failed:', error);
+            setNodes(previous => previous.map(candidate => candidate.id === nodeId
+                ? {
+                    ...candidate,
+                    status: NodeStatus.ERROR,
+                    errorMessage: error instanceof Error ? error.message : 'Failed to upload audio.'
+                }
+                : candidate));
+        }
+    }, [nodes, setNodes]);
+
     /**
      * Handle file upload from context menu
      */
@@ -216,8 +251,9 @@ export const useAssetHandlers = ({
 
         const isVideo = file.type.startsWith('video/');
         const isImage = file.type.startsWith('image/');
+        const isAudio = file.type.startsWith('audio/');
 
-        if (!isVideo && !isImage) return;
+        if (!isVideo && !isImage && !isAudio) return;
 
         // Check file size (server limit 100MB)
         if (file.size > 100 * 1024 * 1024) {
@@ -230,7 +266,7 @@ export const useAssetHandlers = ({
             const base64Data = e.target?.result as string;
 
             try {
-                const type = isVideo ? 'videos' : 'images';
+                const type = isAudio ? 'audio' : isVideo ? 'videos' : 'images';
                 const responseData = await apiPost<{ url: string }>(`/api/assets/${type}`, {
                     data: base64Data,
                     prompt: file.name
@@ -273,7 +309,7 @@ export const useAssetHandlers = ({
                     }
 
                     const newNode: NodeData = {
-                        ...createDefaultNodeData(isVideo ? NodeType.VIDEO : NodeType.IMAGE),
+                        ...createDefaultNodeData(isAudio ? NodeType.AUDIO : isVideo ? NodeType.VIDEO : NodeType.IMAGE),
                         id: crypto.randomUUID(),
                         x: canvasX,
                         y: canvasY,
@@ -315,6 +351,7 @@ export const useAssetHandlers = ({
         handleOpenCreateAsset,
         handleSaveAssetToLibrary,
         handleSaveSubjectAsset,
+        handleAudioNodeUpload,
         handleContextUpload
     };
 };
