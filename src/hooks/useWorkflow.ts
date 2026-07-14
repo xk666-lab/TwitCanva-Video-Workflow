@@ -11,6 +11,7 @@ import { apiGet, apiPost } from '../services/apiClient';
 import { createWorkflowData } from '../domain/workflow/workflowSchema';
 import { migrateWorkflow } from '../domain/workflow/migrateWorkflow';
 import type { CanvasEdge } from '../domain/graph/graphTypes';
+import { syncLegacyStoryboardContexts } from '../domain/storyboard/storyboardGraph';
 
 interface UseWorkflowOptions {
     nodes: NodeData[];
@@ -50,7 +51,7 @@ export const useWorkflow = ({
                 title: canvasTitle,
                 nodes,
                 edges,
-                groups,
+                groups: syncLegacyStoryboardContexts(nodes, groups),
                 viewport
             });
 

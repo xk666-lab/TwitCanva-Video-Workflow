@@ -8,6 +8,7 @@
 import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { NodeData, NodeType, Viewport } from '../types';
 import { createDefaultNodeData } from '../domain/nodes/nodeRegistry';
+import { applyNodeUpdateMap, type NodeUpdateMap } from '../domain/nodes/nodeUpdates';
 import type { CanvasEdge, ConnectionValidationResult } from '../domain/graph/graphTypes';
 import { CURRENT_EDGE_SCHEMA_VERSION } from '../domain/graph/graphTypes';
 import { resolveConnectionPorts, validateConnection } from '../domain/graph/connectionRules';
@@ -162,6 +163,10 @@ export const useNodeManagement = () => {
         setNodes(prev => prev.map(n => n.id === id ? { ...n, ...updates } : n));
     };
 
+    const applyNodeUpdates = useCallback((updates: NodeUpdateMap) => {
+        setNodes(previous => applyNodeUpdateMap(previous, updates));
+    }, [setNodes]);
+
     /**
      * Deletes a node by ID
      * @param id - Node ID to delete
@@ -270,6 +275,7 @@ export const useNodeManagement = () => {
         setSelectedNodeIds,
         addNode,
         updateNode,
+        applyNodeUpdates,
         deleteNode,
         deleteNodes,
         addEdge,

@@ -210,3 +210,49 @@ export function sessionFromLegacyStoryContext(context: LegacyStoryContext): Stor
     compositeImageUrl: context.compositeImageUrl || null
   };
 }
+
+export function documentsFromSession(options: {
+  session: StoryboardSessionSnapshot;
+  scriptNodeId: string;
+  storyboardNodeId: string;
+  now: string;
+}): { scriptData: ScriptDocument; storyboardData: StoryboardDocument } {
+  const { session, scriptNodeId, storyboardNodeId, now } = options;
+  return {
+    scriptData: {
+      ...createEmptyScriptDocument({ sourceText: session.story, now }),
+      synopsis: session.story,
+      styleAnchor: session.styleAnchor,
+      characterDNA: { ...session.characterDNA },
+      referenceAssets: session.selectedCharacters.map(asset => ({ ...asset }))
+    },
+    storyboardData: {
+      ...createEmptyStoryboardDocument({
+        sourceScriptNodeId: scriptNodeId,
+        selectedImageModel: session.selectedImageModel,
+        now
+      }),
+      shots: session.scripts.map((shot, index) => normalizeStoryboardShot(shot, index, storyboardNodeId)),
+      compositeImageUrl: session.compositeImageUrl
+    }
+  };
+}
+
+export function legacyStoryContextFromDocuments(
+  scriptData: ScriptDocument,
+  storyboardData: StoryboardDocument,
+  ids: { scriptNodeId: string; storyboardNodeId: string }
+): LegacyStoryContext {
+  return {
+    story: scriptData.sourceText || scriptData.synopsis,
+    scripts: storyboardData.shots.map(shot => ({ ...shot })),
+    selectedCharacters: scriptData.referenceAssets.map(asset => ({ ...asset })),
+    sceneCount: storyboardData.shots.length,
+    styleAnchor: scriptData.styleAnchor,
+    characterDNA: { ...scriptData.characterDNA },
+    compositeImageUrl: storyboardData.compositeImageUrl || null,
+    selectedImageModel: storyboardData.selectedImageModel,
+    scriptNodeId: ids.scriptNodeId,
+    storyboardNodeId: ids.storyboardNodeId
+  };
+}

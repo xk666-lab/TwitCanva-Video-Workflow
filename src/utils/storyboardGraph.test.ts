@@ -1,0 +1,241 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import type { NodeData, NodeGroup } from '../types.ts';
+import { createDefaultNodeData } from '../domain/nodes/nodeRegistry.ts';
+import {
+  attachImageNodesToShots,
+  attachVideoNodesToShots,
+  buildStoryboardMediaProjectionUpdates,
+  createStoryboardDraftGraph,
+  ensureStoryboardNodePair,
+  getEffectiveStoryContext,
+  materializeLegacyStoryboardGroup,
+  syncLegacyStoryboardContexts
+} from '../domain/storyboard/storyboardGraph.ts';
+import { applyNodeUpdateMap } from '../domain/nodes/nodeUpdates.ts';
+
+const NOW = '2026-07-14T00:00:00.000Z';
+const IDS = ['script-1', 'storyboard-1', 'edge-1'];
+
+function nextId(): string {
+  const id = IDS.shift();
+  assert.ok(id);
+  return id;
+}
+
+test('draft creation adds one script, one storyboard, and one typed edge', () => {
+  const result = createStoryboardDraftGraph({
+    nodes: [],
+    edges: [],
+    center: { x: 500, y: 300 },
+    session: {
+      story: 'A city wakes under the sea',
+      scripts: [],
+      selectedCharacters: [],
+      sceneCount: 3,
+      styleAnchor: '',
+      characterDNA: {},
+      selectedImageModel: 'gpt-image-2',
+      compositeImageUrl: null
+    },
+    idFactory: nextId,
+    now: NOW
+  });
+
+  assert.equal(result.nodes.length, 2);
+  assert.equal(result.edges.length, 1);
+  assert.equal(result.scriptNodeId, 'script-1');
+  assert.equal(result.storyboardNodeId, 'storyboard-1');
+  assert.equal(result.edges[0].sourcePortId, 'script-output');
+  assert.equal(result.edges[0].targetPortId, 'script-input');
+  assert.equal(result.edges[0].dataType, 'script');
+  assert.deepEqual(result.nodes.find(node => node.id === 'storyboard-1')?.parentIds, ['script-1']);
+});
+
+test('a manually created script node gains only the missing storyboard partner', () => {
+  const scriptNode = {
+    ...createDefaultNodeData('脚本' as NodeData['type']),
+    id: 'script-only',
+    x: 10,
+    y: 20,
+    parentIds: []
+  } as NodeData;
+  const ids = ['storyboard-added', 'edge-added'];
+  const result = ensureStoryboardNodePair({
+    nodes: [scriptNode],
+    edges: [],
+    scriptNodeId: 'script-only',
+    center: { x: 0, y: 0 },
+    session: {
+      story: 'Manual script',
+      scripts: [],
+      selectedCharacters: [],
+      sceneCount: 3,
+      styleAnchor: '',
+      characterDNA: {},
+      selectedImageModel: 'gpt-image-2',
+      compositeImageUrl: null
+    },
+    idFactory: () => ids.shift() || 'unexpected',
+    now: NOW
+  });
+
+  assert.equal(result.nodes.filter(node => node.type === '脚本').length, 1);
+  assert.equal(result.storyboardNodeId, 'storyboard-added');
+  assert.equal(result.edges[0].sourceNodeId, 'script-only');
+});
+
+test('legacy materialization is lazy and idempotent', () => {
+  const group: NodeGroup = {
+    id: 'legacy-group',
+    nodeIds: ['image-1'],
+    label: 'Legacy storyboard',
+    storyContext: {
+      story: 'A tiny adventure',
+      scripts: [{
+        id: 'legacy-shot-1',
+        order: 0,
+        sceneNumber: 1,
+        description: 'A fox enters a library',
+        cameraAngle: 'Wide shot',
+        mood: 'Curious',
+        status: 'draft',
+        revision: 0
+      }]
+    }
+  };
+  const idValues = ['script-new', 'storyboard-new', 'edge-new'];
+  const first = materializeLegacyStoryboardGroup({
+    group,
+    nodes: [],
+    edges: [],
+    anchor: { x: 0, y: 0 },
+    idFactory: () => idValues.shift() || 'unexpected',
+    now: NOW
+  });
+  const second = materializeLegacyStoryboardGroup({
+    group: first.group,
+    nodes: first.nodes,
+    edges: first.edges,
+    anchor: { x: 0, y: 0 },
+    idFactory: () => 'must-not-be-used',
+    now: NOW
+  });
+
+  assert.equal(first.nodes.length, 2);
+  assert.equal(first.group.storyContext?.scriptNodeId, 'script-new');
+  assert.equal(first.group.storyContext?.storyboardNodeId, 'storyboard-new');
+  assert.deepEqual(second, first);
+});
+
+test('new documents project to legacy context and media ids attach by shot order', () => {
+  const created = createStoryboardDraftGraph({
+    nodes: [],
+    edges: [],
+    center: { x: 0, y: 0 },
+    session: {
+      story: 'A mountain opens',
+      scripts: [{
+        id: 'shot-1',
+        order: 0,
+        sceneNumber: 1,
+        description: 'Stone doors separate',
+        cameraAngle: 'Low angle',
+        mood: 'Epic',
+        status: 'ready',
+        revision: 0
+      }],
+      selectedCharacters: [],
+      sceneCount: 1,
+      styleAnchor: 'cinematic',
+      characterDNA: {},
+      selectedImageModel: 'gpt-image-2',
+      compositeImageUrl: null
+    },
+    idFactory: (() => {
+      const ids = ['script-a', 'storyboard-a', 'edge-a'];
+      return () => ids.shift() || 'unexpected';
+    })(),
+    now: NOW
+  });
+  const script = created.nodes.find(node => node.id === 'script-a');
+  const storyboard = created.nodes.find(node => node.id === 'storyboard-a');
+  assert.ok(script?.scriptData && storyboard?.storyboardData);
+
+  const withImage = attachImageNodesToShots(storyboard.storyboardData, ['image-a'], NOW);
+  const withVideo = attachVideoNodesToShots(withImage, new Map([['image-a', 'video-a']]), NOW);
+  const group: NodeGroup = {
+    id: 'group-a',
+    nodeIds: ['image-a'],
+    label: 'Storyboard',
+    storyContext: {
+      story: '',
+      scripts: [],
+      scriptNodeId: 'script-a',
+      storyboardNodeId: 'storyboard-a'
+    }
+  };
+  const nodes = created.nodes.map(node => node.id === 'storyboard-a'
+    ? { ...node, storyboardData: withVideo }
+    : node);
+  const synced = syncLegacyStoryboardContexts(nodes, [group]);
+  const effective = getEffectiveStoryContext(synced[0], nodes);
+
+  assert.equal(withVideo.shots[0].imageNodeId, 'image-a');
+  assert.equal(withVideo.shots[0].videoNodeId, 'video-a');
+  assert.equal(effective.story, 'A mountain opens');
+  assert.equal(effective.scripts[0].videoNodeId, 'video-a');
+});
+
+test('node update maps apply all matching updates in one pure pass', () => {
+  const nodes = [{ id: 'a', prompt: 'old-a' }, { id: 'b', prompt: 'old-b' }] as NodeData[];
+  const updated = applyNodeUpdateMap(nodes, {
+    a: { prompt: 'new-a' },
+    b: { prompt: 'new-b' }
+  });
+
+  assert.deepEqual(updated.map(node => node.prompt), ['new-a', 'new-b']);
+  assert.equal(nodes[0].prompt, 'old-a');
+});
+
+test('shot task projections follow linked media nodes and clear dangling ids', () => {
+  const storyboard = {
+    ...createDefaultNodeData('分镜管理器' as NodeData['type']),
+    id: 'storyboard-status',
+    x: 0,
+    y: 0,
+    parentIds: [],
+    storyboardData: {
+      ...createDefaultNodeData('分镜管理器' as NodeData['type']).storyboardData!,
+      shots: [{
+        id: 'shot-status',
+        order: 0,
+        sceneNumber: 1,
+        description: 'A generated shot',
+        cameraAngle: 'Wide shot',
+        mood: '',
+        imageNodeId: 'missing-image',
+        videoNodeId: 'video-status',
+        status: 'video-running' as const,
+        revision: 0
+      }]
+    }
+  } as NodeData;
+  const video = {
+    ...createDefaultNodeData('视频' as NodeData['type']),
+    id: 'video-status',
+    x: 0,
+    y: 0,
+    parentIds: [],
+    status: 'success' as NodeData['status'],
+    lastTaskId: 'video-task'
+  } as NodeData;
+  const updates = buildStoryboardMediaProjectionUpdates([storyboard, video], NOW);
+  const shot = updates['storyboard-status'].storyboardData?.shots[0];
+
+  assert.equal(shot?.status, 'video-ready');
+  assert.equal(shot?.lastTaskId, 'video-task');
+  assert.equal(shot?.imageNodeId, undefined);
+  assert.equal(updates['storyboard-status'].storyboardData?.revision, 0);
+});
