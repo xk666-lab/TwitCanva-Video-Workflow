@@ -21,6 +21,11 @@
       "id": "storyboard-group",
       "nodeIds": ["scene-1"],
       "label": "Storyboard",
+      "x": 24,
+      "y": 48,
+      "width": 640,
+      "height": 480,
+      "position": { "x": 24, "y": 48 },
       "storyContext": {
         "story": "A tiny adventure",
         "scripts": [

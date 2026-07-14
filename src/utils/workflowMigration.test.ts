@@ -163,9 +163,11 @@ test('legacy storyboard groups gain normalized shots without visible node creati
     rawNodes.map(node => ({ id: node.id, x: node.x, y: node.y }))
   );
   assert.deepEqual(migratedGroup.nodeIds, rawGroup.nodeIds);
-  for (const key of ['x', 'y', 'width', 'height', 'position', 'positionAbsolute', 'geometry']) {
-    if (key in rawGroup) assert.deepEqual(migratedGroup[key], rawGroup[key], key);
-  }
+  assert.equal(migratedGroup.x, 24);
+  assert.equal(migratedGroup.y, 48);
+  assert.equal(migratedGroup.width, 640);
+  assert.equal(migratedGroup.height, 480);
+  assert.deepEqual(migratedGroup.position, { x: 24, y: 48 });
   assert.deepEqual(migrated.viewport, raw.viewport);
   assert.equal(migrated.groups[0].storyContext?.scripts[0].id, 'legacy-shot-storyboard-group-1');
   assert.equal(migrated.groups[0].storyContext?.scripts[0].order, 0);
