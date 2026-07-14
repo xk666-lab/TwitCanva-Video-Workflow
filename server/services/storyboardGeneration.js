@@ -3,6 +3,25 @@ import { resolveImageToBase64 } from '../utils/imageHelpers.js';
 import { requestChatCompletion } from './openaiChat.js';
 import { generateStoryPackage } from './storyboardText.js';
 
+const SENSITIVE_STORY_PACKAGE_OUTPUT_KEY = /(api.?key|(?:access|private|secret).?key|authorization|authorisation|token|secret|password)/i;
+
+function sanitizeStoryPackageOutputValue(value) {
+    if (Array.isArray(value)) {
+        return value.map(item => sanitizeStoryPackageOutputValue(item) ?? null);
+    }
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(
+            Object.entries(value)
+                .filter(([key]) => !SENSITIVE_STORY_PACKAGE_OUTPUT_KEY.test(key))
+                .map(([key, item]) => [key, sanitizeStoryPackageOutputValue(item)])
+                .filter(([, item]) => item !== undefined)
+        );
+    }
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+    return undefined;
+}
+
 export function normalizeTextReferences({ characterDescriptions = [], referenceImages = [] }) {
     if (Array.isArray(characterDescriptions) && characterDescriptions.length > 0) {
         return characterDescriptions.map(character => ({
@@ -116,7 +135,8 @@ export function buildStoryPackageTaskOutput(task, result, now = new Date().toISO
             revision: Number(previous.revision || 0) + 1
         };
     });
-    return {
+    // Client task-result guards compare these immutable base revisions; the embedded documents advance on success.
+    return sanitizeStoryPackageOutputValue({
         kind: 'story-package',
         scriptRevision: input.scriptRevision,
         storyboardRevision: input.storyboardRevision,
@@ -140,7 +160,7 @@ export function buildStoryPackageTaskOutput(task, result, now = new Date().toISO
             generatedBy,
             updatedAt: now
         }
-    };
+    });
 }
 
 function extractJsonText(text) {

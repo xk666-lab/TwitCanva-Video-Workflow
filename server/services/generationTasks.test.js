@@ -117,6 +117,39 @@ test('active duplicate submissions reuse one task but completed regeneration cre
     await waitForStatus(manager, regenerated.task.taskId, GenerationTaskStatus.SUCCEEDED);
 });
 
+test('manager hashes, deduplicates, and persists a stubbed task execution', async t => {
+    const tasksDir = createTempTasksDir();
+    t.after(() => fs.rmSync(tasksDir, { recursive: true, force: true }));
+    let releaseExecution;
+    const executionGate = new Promise(resolve => { releaseExecution = resolve; });
+    let executions = 0;
+    const manager = createGenerationTaskManager({
+        tasksDir,
+        concurrency: 1,
+        executor: async task => {
+            executions += 1;
+            await executionGate;
+            return { resultUrl: `/library/images/${task.taskId}.png` };
+        }
+    });
+    await manager.initialize();
+
+    const first = await manager.submitTask(createSubmission());
+    await waitForStatus(manager, first.task.taskId, GenerationTaskStatus.RUNNING);
+    const duplicate = await manager.submitTask(createSubmission());
+    const persisted = JSON.parse(fs.readFileSync(path.join(tasksDir, `${first.task.taskId}.json`), 'utf8'));
+
+    assert.equal(duplicate.reused, true);
+    assert.equal(duplicate.task.taskId, first.task.taskId);
+    assert.match(persisted.inputHash, /^[a-f0-9]{64}$/);
+    assert.equal(persisted.inputHash, first.task.inputHash);
+    assert.equal(executions, 1);
+
+    releaseExecution();
+    const completed = await waitForStatus(manager, first.task.taskId, GenerationTaskStatus.SUCCEEDED);
+    assert.equal(completed.output.resultUrl, `/library/images/${first.task.taskId}.png`);
+});
+
 test('queue enforces concurrency and persists successful output', async t => {
     const tasksDir = createTempTasksDir();
     t.after(() => fs.rmSync(tasksDir, { recursive: true, force: true }));

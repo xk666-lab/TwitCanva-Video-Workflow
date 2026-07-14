@@ -260,6 +260,11 @@ test('task output preserves stable shot ids and advances both document revisions
                 characterDNA: {},
                 referenceAssets: [],
                 revision: 2,
+                apiKey: 'script-secret',
+                futureScript: {
+                    keep: 'script-extension',
+                    accessToken: 'script-access-token'
+                },
                 createdAt: '2026-07-14T00:00:00.000Z',
                 updatedAt: '2026-07-14T00:00:00.000Z'
             },
@@ -268,6 +273,11 @@ test('task output preserves stable shot ids and advances both document revisions
                 sourceScriptNodeId: 'script-1',
                 selectedImageModel: 'gpt-image-2',
                 revision: 4,
+                password: 'storyboard-secret',
+                futureStoryboard: {
+                    keep: 'storyboard-extension',
+                    secretKey: 'storyboard-secret-key'
+                },
                 createdAt: '2026-07-14T00:00:00.000Z',
                 updatedAt: '2026-07-14T00:00:00.000Z',
                 shots: [{
@@ -279,7 +289,15 @@ test('task output preserves stable shot ids and advances both document revisions
                     mood: 'Old mood',
                     imageNodeId: 'image-1',
                     status: 'image-ready',
-                    revision: 3
+                    revision: 3,
+                    authorization: 'shot-authorization',
+                    nested: {
+                        bearerToken: 'shot-token',
+                        keep: 'shot-nested-extension'
+                    },
+                    futureShot: {
+                        keep: 'shot-extension'
+                    }
                 }]
             }
         }
@@ -301,6 +319,18 @@ test('task output preserves stable shot ids and advances both document revisions
     assert.equal(output.kind, 'story-package');
     assert.equal(output.scriptData.revision, 3);
     assert.equal(output.storyboardData.revision, 5);
+    assert.equal(output.scriptData.revision, output.scriptRevision + 1);
+    assert.equal(output.storyboardData.revision, output.storyboardRevision + 1);
     assert.equal(output.storyboardData.shots[0].id, 'stable-shot');
     assert.equal(output.storyboardData.shots[0].imageNodeId, 'image-1');
+    assert.equal(output.scriptData.apiKey, undefined);
+    assert.equal(output.scriptData.futureScript.keep, 'script-extension');
+    assert.equal(output.scriptData.futureScript.accessToken, undefined);
+    assert.equal(output.storyboardData.password, undefined);
+    assert.equal(output.storyboardData.futureStoryboard.keep, 'storyboard-extension');
+    assert.equal(output.storyboardData.futureStoryboard.secretKey, undefined);
+    assert.equal(output.storyboardData.shots[0].authorization, undefined);
+    assert.equal(output.storyboardData.shots[0].nested.bearerToken, undefined);
+    assert.equal(output.storyboardData.shots[0].nested.keep, 'shot-nested-extension');
+    assert.equal(output.storyboardData.shots[0].futureShot.keep, 'shot-extension');
 });
