@@ -6,6 +6,7 @@ import {
   generateImage,
   queryGenerationTasks,
   retryGenerationTask,
+  submitImageEdit,
   submitImageGeneration
 } from '../services/generationService.ts';
 
@@ -168,6 +169,59 @@ test('submitImageGeneration returns after task creation without starting a per-n
 
   assert.equal(task.taskId, 'task-submit-only');
   assert.equal(fetchCount, 1);
+});
+
+test('submitImageEdit uses the shared task endpoint with immutable edit provenance', async t => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  let requestBody: Record<string, unknown> | undefined;
+  globalThis.fetch = async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body));
+    return jsonResponse({
+      task: {
+        schemaVersion: 1,
+        taskId: 'edit-task-1',
+        workflowId: 'workflow-1',
+        nodeId: 'derived-image-1',
+        operation: 'edit-image',
+        provider: 'openai',
+        model: 'gpt-image-2',
+        status: 'queued',
+        progress: 0,
+        inputSnapshot: requestBody?.inputSnapshot,
+        inputHash: 'a'.repeat(64),
+        parameters: {},
+        attempt: 1,
+        createdAt: '2026-07-15T00:00:00.000Z',
+        updatedAt: '2026-07-15T00:00:00.000Z'
+      }
+    }, 202);
+  };
+
+  const task = await submitImageEdit({
+    nodeId: 'derived-image-1',
+    prompt: 'Replace the backdrop with a paper theatre.',
+    aspectRatio: '1536x1024',
+    resolution: '2K',
+    imageModel: 'gpt-image-2',
+    imageBase64: '/library/images/source.png',
+    imageEdit: {
+      mode: 'prompt-edit',
+      sourceNodeId: 'source-1',
+      sourceTakeId: 'take-source-1',
+      editorNodeId: 'editor-1'
+    }
+  }, { workflowId: 'workflow-1' });
+
+  assert.equal(task.taskId, 'edit-task-1');
+  assert.equal(requestBody?.operation, 'edit-image');
+  assert.equal(requestBody?.workflowId, 'workflow-1');
+  assert.deepEqual((requestBody?.inputSnapshot as Record<string, unknown>).imageEdit, {
+    mode: 'prompt-edit',
+    sourceNodeId: 'source-1',
+    sourceTakeId: 'take-source-1',
+    editorNodeId: 'editor-1'
+  });
 });
 
 test('submitStoryPackageGeneration uses the shared task endpoint without polling', async t => {

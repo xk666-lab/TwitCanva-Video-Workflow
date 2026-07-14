@@ -1,3 +1,9 @@
+import type { ImageEditMode } from '../../../types';
+import type {
+    ImageEditGenerationRequest,
+    ImageEditSource
+} from '../../../domain/imageEditing/imageEdit.ts';
+
 /**
  * imageEditor.types.ts
  * 
@@ -65,8 +71,10 @@ export interface ImageEditorModalProps {
     initialCanvasData?: string;
     initialCanvasSize?: { width: number; height: number };
     initialBackgroundUrl?: string; // Original/clean image for editing
+    initialEditMode?: ImageEditMode;
+    source?: ImageEditSource;
     onClose: () => void;
-    onGenerate: (id: string, prompt: string, count: number) => void;
+    onGenerate: (request: ImageEditGenerationRequest) => Promise<void> | void;
     onUpdate: (id: string, updates: any) => void;
 }
 

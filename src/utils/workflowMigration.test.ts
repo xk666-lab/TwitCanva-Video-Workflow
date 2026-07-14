@@ -56,6 +56,34 @@ test('task-aware workflows migrate to the current schema and preserve task refer
   assert.equal(migrated.nodes[0].lastTaskId, 'task-previous');
 });
 
+test('existing image editor nodes receive the safe edit-mode default without a schema bump', () => {
+  const raw = {
+    schemaVersion: CURRENT_WORKFLOW_SCHEMA_VERSION,
+    id: 'image-editor-defaults',
+    title: 'Image editor defaults',
+    nodes: [{
+      id: 'editor-1',
+      type: '图片编辑器',
+      x: 0,
+      y: 0,
+      prompt: '',
+      status: 'idle',
+      model: 'gpt-image-2',
+      aspectRatio: 'Auto',
+      resolution: '1K'
+    }],
+    edges: [],
+    groups: [],
+    viewport: { x: 0, y: 0, zoom: 1 }
+  };
+
+  const migrated = migrateWorkflow(raw, { warn: () => undefined });
+
+  assert.equal(migrated.schemaVersion, CURRENT_WORKFLOW_SCHEMA_VERSION);
+  assert.equal(migrated.nodes[0].imageEditMode, 'prompt-edit');
+  assert.deepEqual(migrateWorkflow(migrated, { warn: () => undefined }), migrated);
+});
+
 test('migrates a schema-less text workflow from version 1 to the current version', () => {
   const migrated = migrateWorkflow(fixture('legacy-text.json'));
 

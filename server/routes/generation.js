@@ -114,6 +114,7 @@ export function recoverGenerationTaskOutput(task, locals) {
 
 const SUPPORTED_TASK_OPERATIONS = new Set([
     'generate-image',
+    'edit-image',
     'generate-video',
     'generate-local-image',
     'generate-story-package'
@@ -167,7 +168,7 @@ function resolveTaskProviderAndModel(operation, inputSnapshot, locals) {
         };
     }
 
-    if (operation === 'generate-image') {
+    if (operation === 'generate-image' || operation === 'edit-image') {
         const requestedModel = inputSnapshot.imageModel || locals.OPENAI_IMAGE_MODEL || 'gpt-image-2';
         const model = requestedModel === 'gpt-image-1.5' ? 'gpt-image-2' : requestedModel;
         const provider = model.startsWith('kling-')
@@ -237,6 +238,30 @@ function validateStoryPackageTaskInput(inputSnapshot) {
     }
 }
 
+function validateImageEditTaskInput(inputSnapshot) {
+    if (typeof inputSnapshot.prompt !== 'string' || !inputSnapshot.prompt.trim()) {
+        throw new TypeError('An edit prompt is required');
+    }
+    if (typeof inputSnapshot.imageBase64 !== 'string' || !inputSnapshot.imageBase64.trim()) {
+        throw new TypeError('A source image is required for image editing');
+    }
+    if (!inputSnapshot.imageEdit || typeof inputSnapshot.imageEdit !== 'object' || Array.isArray(inputSnapshot.imageEdit)) {
+        throw new TypeError('Image edit provenance is required');
+    }
+    if (!['prompt-edit', 'expand'].includes(inputSnapshot.imageEdit.mode)) {
+        throw new TypeError('Unsupported image edit mode');
+    }
+    if (typeof inputSnapshot.imageEdit.sourceNodeId !== 'string' || !inputSnapshot.imageEdit.sourceNodeId.trim()) {
+        throw new TypeError('An image edit source node is required');
+    }
+    if (typeof inputSnapshot.imageEdit.editorNodeId !== 'string' || !inputSnapshot.imageEdit.editorNodeId.trim()) {
+        throw new TypeError('An image editor node is required');
+    }
+    if (inputSnapshot.imageEdit.sourceTakeId !== undefined && typeof inputSnapshot.imageEdit.sourceTakeId !== 'string') {
+        throw new TypeError('Invalid image edit source take');
+    }
+}
+
 function prepareTaskSubmission(body, locals, operationOverride) {
     const operation = operationOverride || body?.operation;
     if (!SUPPORTED_TASK_OPERATIONS.has(operation)) {
@@ -263,6 +288,9 @@ function prepareTaskSubmission(body, locals, operationOverride) {
     };
     if (operation === 'generate-story-package') {
         validateStoryPackageTaskInput(inputSnapshot);
+    }
+    if (operation === 'edit-image') {
+        validateImageEditTaskInput(inputSnapshot);
     }
     const { provider, model } = resolveTaskProviderAndModel(operation, inputSnapshot, locals);
 
@@ -384,7 +412,7 @@ router.post('/generate-video', (req, res) => runLegacyGeneration(req, res, 'gene
 // ============================================================================
 
 async function executeImageGeneration(inputSnapshot, locals) {
-        const { nodeId, generationTaskId, prompt, aspectRatio, resolution, imageBase64: rawImageBase64, imageModel: requestedImageModel, klingReferenceMode, klingFaceIntensity, klingSubjectIntensity } = inputSnapshot;
+        const { nodeId, generationTaskId, prompt, aspectRatio, resolution, imageBase64: rawImageBase64, imageModel: requestedImageModel, klingReferenceMode, klingFaceIntensity, klingSubjectIntensity, imageEdit } = inputSnapshot;
         const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_IMAGE_MODEL, IMAGES_DIR } = locals;
         const selectedImageModel = requestedImageModel || OPENAI_IMAGE_MODEL || 'gpt-image-2';
         const imageModel = selectedImageModel === 'gpt-image-1.5' ? 'gpt-image-2' : selectedImageModel;
@@ -520,6 +548,18 @@ async function executeImageGeneration(inputSnapshot, locals) {
         const saved = saveBufferToFile(imageBuffer, IMAGES_DIR, 'img', imageFormat);
 
         const createdAt = new Date().toISOString();
+        const imageEditMetadata = imageEdit ? {
+            operation: 'edit-image',
+            mode: imageEdit.mode,
+            sourceNodeId: imageEdit.sourceNodeId,
+            editorNodeId: imageEdit.editorNodeId,
+            ...(typeof imageEdit.sourceTakeId === 'string' && imageEdit.sourceTakeId
+                ? { sourceTakeId: imageEdit.sourceTakeId }
+                : {}),
+            ...(typeof rawImageBase64 === 'string' && rawImageBase64.startsWith('/library/')
+                ? { sourceUrl: rawImageBase64 }
+                : {})
+        } : {};
         const take = createMediaTake({
             nodeId: nodeId || saved.id,
             type: 'image',
@@ -530,7 +570,8 @@ async function executeImageGeneration(inputSnapshot, locals) {
             metadata: {
                 filename: saved.filename,
                 format: imageFormat,
-                generationTaskId
+                generationTaskId,
+                ...imageEditMetadata
             }
         });
 
@@ -544,7 +585,8 @@ async function executeImageGeneration(inputSnapshot, locals) {
             createdAt,
             type: 'images',
             mediaType: 'image',
-            generationTaskId
+            generationTaskId,
+            metadata: take.metadata
         };
         fs.writeFileSync(path.join(IMAGES_DIR, `${take.id}.json`), JSON.stringify(metadata, null, 2));
 
@@ -801,6 +843,9 @@ export async function executeGenerationTask(task, locals, dependencies = {}) {
         return buildStoryPackageTaskOutput(task, result);
     }
     if (task.operation === 'generate-image') {
+        return executeImageGeneration({ ...task.inputSnapshot, generationTaskId: task.taskId }, locals);
+    }
+    if (task.operation === 'edit-image') {
         return executeImageGeneration({ ...task.inputSnapshot, generationTaskId: task.taskId }, locals);
     }
     if (task.operation === 'generate-video') {

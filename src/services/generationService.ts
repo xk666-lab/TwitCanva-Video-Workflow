@@ -8,6 +8,7 @@
  */
 
 import type { GenerationTask } from '../domain/generation/generationTask.ts';
+import type { ImageEditTaskInput } from '../domain/imageEditing/imageEdit.ts';
 import type { GenerateStoryPackageTaskInput } from '../domain/storyboard/storyboardTypes.ts';
 import type { SubjectReferenceSnapshot } from '../domain/subjects/subjectAsset.ts';
 import type { MediaTake } from '../types';
@@ -128,8 +129,8 @@ export const waitForGenerationTask = async (
 };
 
 export async function submitGenerationTask(
-  operation: 'generate-image' | 'generate-video' | 'generate-local-image' | 'generate-story-package',
-  inputSnapshot: GenerateImageParams | GenerateVideoParams | GenerateStoryPackageTaskInput | Record<string, unknown>,
+  operation: 'generate-image' | 'edit-image' | 'generate-video' | 'generate-local-image' | 'generate-story-package',
+  inputSnapshot: GenerateImageParams | ImageEditTaskInput | GenerateVideoParams | GenerateStoryPackageTaskInput | Record<string, unknown>,
   options: GenerationRequestOptions = {}
 ): Promise<GenerationTask> {
   const nodeId = typeof inputSnapshot.nodeId === 'string' ? inputSnapshot.nodeId : undefined;
@@ -155,6 +156,11 @@ export const submitImageGeneration = async (
   };
   return submitGenerationTask('generate-image', normalizedParams, options);
 };
+
+export const submitImageEdit = (
+  params: ImageEditTaskInput,
+  options: GenerationRequestOptions = {}
+): Promise<GenerationTask> => submitGenerationTask('edit-image', params, options);
 
 export const submitVideoGeneration = (
   params: GenerateVideoParams,

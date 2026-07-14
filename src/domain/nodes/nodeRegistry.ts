@@ -137,7 +137,10 @@ const definitions: NodeDefinition[] = [
     icon: 'image-editor',
     category: 'editing',
     description: '编辑图片并创建派生结果',
-    defaultData: imageDefaults,
+    defaultData: () => ({
+      ...imageDefaults(),
+      imageEditMode: 'prompt-edit'
+    }),
     capabilities: {
       acceptsPrompt: true,
       supportsUpload: true,

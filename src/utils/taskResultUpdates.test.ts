@@ -236,6 +236,59 @@ test('missing media task falls back to legacy status and recovers', async () => 
   assert.equal(recoveredNodes[0].activeTaskId, undefined);
 });
 
+test('edit-image task recovery appends a hero take with immutable source provenance', () => {
+  const currentNodes = mediaNodes().map(node => ({
+    ...node,
+    activeTaskId: 'edit-task'
+  }));
+  const editTask = task({
+    taskId: 'edit-task',
+    nodeId: 'image-1',
+    operation: 'edit-image',
+    provider: 'openai',
+    model: 'gpt-image-2',
+    status: 'succeeded',
+    progress: 100,
+    inputSnapshot: {
+      nodeId: 'image-1',
+      imageEdit: { mode: 'expand', sourceNodeId: 'editor-1' }
+    },
+    output: {
+      resultUrl: '/library/images/edited.png',
+      take: {
+        id: 'edited-take-1',
+        nodeId: 'image-1',
+        type: 'image',
+        url: '/library/images/edited.png',
+        prompt: 'Expand the paper theatre.',
+        model: 'gpt-image-2',
+        createdAt: '2026-07-15T00:00:00.000Z',
+        isHero: true,
+        metadata: {
+          operation: 'edit-image',
+          mode: 'expand',
+          sourceNodeId: 'editor-1',
+          sourceTakeId: 'take-source-1',
+          editorNodeId: 'editor-1'
+        }
+      }
+    }
+  });
+
+  const updates = buildGenerationTaskNodeUpdates(currentNodes, editTask);
+
+  assert.equal(updates['image-1'].status, 'success');
+  assert.equal(updates['image-1'].heroTakeId, 'edited-take-1');
+  assert.equal(updates['image-1'].resultUrl, '/library/images/edited.png');
+  assert.deepEqual(updates['image-1'].takes?.[0].metadata, {
+    operation: 'edit-image',
+    mode: 'expand',
+    sourceNodeId: 'editor-1',
+    sourceTakeId: 'take-source-1',
+    editorNodeId: 'editor-1'
+  });
+});
+
 test('missing story package tasks do not invoke legacy media recovery or receive partial updates', async () => {
   const currentNodes = nodes();
   const scriptDocument = currentNodes[0].scriptData;

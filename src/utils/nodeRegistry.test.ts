@@ -71,6 +71,12 @@ test('image and video defaults use the current production models', () => {
   assert.equal(video.videoModel, DEFAULT_SEEDANCE_VIDEO_MODEL_ID);
 });
 
+test('image editor defaults persist a prompt-driven editing mode', () => {
+  const editor = createDefaultNodeData('图片编辑器' as NodeType);
+
+  assert.equal(editor.imageEditMode, 'prompt-edit');
+});
+
 test('script and storyboard defaults contain fresh persistent documents', () => {
   const firstScript = createDefaultNodeData('脚本' as NodeType);
   const secondScript = createDefaultNodeData('脚本' as NodeType);

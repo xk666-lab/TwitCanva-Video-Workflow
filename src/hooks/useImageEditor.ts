@@ -6,19 +6,26 @@
 
 import { useState, useCallback } from 'react';
 import { NodeData, NodeStatus } from '../types';
+import type { CanvasEdge } from '../domain/graph/graphTypes.ts';
+import {
+    resolveEditorImageSource,
+    type ImageEditSource
+} from '../domain/imageEditing/imageEdit.ts';
 
 interface EditorModalState {
     isOpen: boolean;
     nodeId: string | null;
     imageUrl?: string;
+    source?: ImageEditSource;
 }
 
 interface UseImageEditorOptions {
     nodes: NodeData[];
+    edges: CanvasEdge[];
     updateNode: (id: string, updates: Partial<NodeData>) => void;
 }
 
-export const useImageEditor = ({ nodes, updateNode }: UseImageEditorOptions) => {
+export const useImageEditor = ({ nodes, edges, updateNode }: UseImageEditorOptions) => {
     const [editorModal, setEditorModal] = useState<EditorModalState>({
         isOpen: false,
         nodeId: null
@@ -31,27 +38,15 @@ export const useImageEditor = ({ nodes, updateNode }: UseImageEditorOptions) => 
         const node = nodes.find(n => n.id === nodeId);
         if (!node) return;
 
-        // Get image from parent node if connected (use first parent for editor)
-        let imageUrl: string | undefined;
-
-        if (node.parentIds && node.parentIds.length > 0) {
-            const parentNode = nodes.find(n => n.id === node.parentIds![0]);
-            if (parentNode?.resultUrl) {
-                imageUrl = parentNode.resultUrl;
-            }
-        }
-
-        // Also check if the node itself has a resultUrl (from upload/previous gen)
-        if (!imageUrl && node.resultUrl) {
-            imageUrl = node.resultUrl;
-        }
+        const source = resolveEditorImageSource(node, nodes, edges);
 
         setEditorModal({
             isOpen: true,
             nodeId,
-            imageUrl
+            imageUrl: source?.url,
+            source: source || undefined
         });
-    }, [nodes]);
+    }, [nodes, edges]);
 
     /**
      * Close the image editor

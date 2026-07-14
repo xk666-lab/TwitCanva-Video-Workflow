@@ -9,6 +9,7 @@ import React, { useRef, useEffect } from 'react';
 import { ChevronDown, Check, Banana, Image as ImageIcon, Crop, Monitor } from 'lucide-react';
 import { ImageModel, IMAGE_MODELS } from './imageEditor.types';
 import { OpenAIIcon, KlingIcon } from '../../icons/BrandIcons';
+import type { ImageEditMode } from '../../../types';
 
 // ============================================================================
 // TYPES
@@ -36,6 +37,9 @@ interface PromptBarProps {
     // Batch count
     batchCount: number;
     setBatchCount: (count: number) => void;
+    // Edit mode
+    editMode: ImageEditMode;
+    onEditModeChange: (mode: ImageEditMode) => void;
     // Actions
     onGenerate: () => void;
     // Flags
@@ -63,6 +67,8 @@ export const PromptBar: React.FC<PromptBarProps> = ({
     setShowResolutionDropdown,
     batchCount,
     setBatchCount,
+    editMode,
+    onEditModeChange,
     onGenerate,
     hasInputImage
 }) => {
@@ -184,6 +190,29 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                         )}
                     </div>
                 )}
+            </div>
+
+            <div className="flex items-center rounded-md border border-neutral-600 bg-neutral-700/50 p-0.5 text-[10px] font-medium">
+                <button
+                    type="button"
+                    onClick={() => onEditModeChange('prompt-edit')}
+                    className={`rounded px-2 py-1 transition-colors ${editMode === 'prompt-edit'
+                        ? 'bg-blue-600 text-white'
+                        : 'text-neutral-400 hover:text-white'}`}
+                    title="Prompt-guided image edit"
+                >
+                    Edit
+                </button>
+                <button
+                    type="button"
+                    onClick={() => onEditModeChange('expand')}
+                    className={`rounded px-2 py-1 transition-colors ${editMode === 'expand'
+                        ? 'bg-blue-600 text-white'
+                        : 'text-neutral-400 hover:text-white'}`}
+                    title="Expand the image into the chosen composition"
+                >
+                    Expand
+                </button>
             </div>
 
             {/* Prompt Input - Takes remaining space */}

@@ -27,6 +27,8 @@ export enum NodeStatus {
   ERROR = 'error'
 }
 
+export type ImageEditMode = 'prompt-edit' | 'expand';
+
 export interface MediaTake {
   id: string;
   nodeId: string;
@@ -114,6 +116,7 @@ export interface NodeData {
   editorCanvasData?: string; // Base64 brush/eraser canvas data
   editorCanvasSize?: { width: number; height: number }; // Size of the canvas when elements were saved (for scaling)
   editorBackgroundUrl?: string; // Clean background image URL (without elements) for re-editing
+  imageEditMode?: ImageEditMode; // Persisted AI editing intent for Image Editor nodes
 
   // Change Angle mode (Image nodes only)
   angleMode?: boolean; // Whether the node is in angle editing mode

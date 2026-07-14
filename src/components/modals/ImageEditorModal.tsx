@@ -6,6 +6,7 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import type { ImageEditMode } from '../../types';
 
 // Types and constants
 import {
@@ -43,6 +44,8 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
     initialElements,
     initialCanvasData,
     initialBackgroundUrl,
+    initialEditMode,
+    source,
     onClose,
     onGenerate,
     onUpdate
@@ -58,6 +61,8 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
     const [selectedModel, setSelectedModel] = useState(initialModel || 'gemini-pro');
     const [selectedAspectRatio, setSelectedAspectRatio] = useState(initialAspectRatio || 'Auto');
     const [selectedResolution, setSelectedResolution] = useState(initialResolution || '1K');
+    const [selectedEditMode, setSelectedEditMode] = useState<ImageEditMode>(initialEditMode || 'prompt-edit');
+    const [generationError, setGenerationError] = useState<string | null>(null);
 
     // --- Element State (persisted to node) ---
     const [elements, setElements] = useState<EditorElement[]>(initialElements || []);
@@ -264,7 +269,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
     });
 
     const currentModel = IMAGE_MODELS.find(m => m.id === selectedModel) || IMAGE_MODELS[0];
-    const hasInputImage = !!imageUrl;
+    const hasInputImage = !!localImageUrl;
 
     // --- Effects ---
 
@@ -292,13 +297,15 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
         setSelectedModel(initialModel || 'gemini-pro');
         setSelectedAspectRatio(initialAspectRatio || 'Auto');
         setSelectedResolution(initialResolution || '1K');
+        setSelectedEditMode(initialEditMode || 'prompt-edit');
+        setGenerationError(null);
         // Use initialBackgroundUrl (clean image) if available, otherwise imageUrl (might be composite or input)
         setLocalImageUrl(initialBackgroundUrl || imageUrl);
         setElements(initialElements || []);
 
         hasInitializedRef.current = true;
         initializedNodeIdRef.current = nodeId;
-    }, [isOpen, nodeId, initialPrompt, initialModel, initialAspectRatio, initialResolution, imageUrl, initialElements]);
+    }, [isOpen, nodeId, initialPrompt, initialModel, initialAspectRatio, initialResolution, initialEditMode, imageUrl, initialElements]);
 
     // Restore brush canvas data from node when modal opens
     useEffect(() => {
@@ -408,14 +415,39 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
 
     // --- Handlers ---
 
-    const handleGenerateClick = () => {
+    const handleGenerateClick = async () => {
+        const sourceUrl = localImageUrl || source?.url;
+        if (!sourceUrl) {
+            setGenerationError('Choose or connect an image before starting an AI edit.');
+            return;
+        }
+
+        const currentSource = source?.url === sourceUrl
+            ? source
+            : { nodeId, url: sourceUrl };
+
+        setGenerationError(null);
         onUpdate(nodeId, {
             prompt,
             imageModel: selectedModel,
             aspectRatio: selectedAspectRatio,
-            resolution: selectedResolution
+            resolution: selectedResolution,
+            imageEditMode: selectedEditMode
         });
-        onGenerate(nodeId, prompt, batchCount);
+        try {
+            await onGenerate({
+                editorNodeId: nodeId,
+                source: currentSource,
+                prompt,
+                mode: selectedEditMode,
+                imageModel: selectedModel,
+                aspectRatio: selectedAspectRatio,
+                resolution: selectedResolution,
+                count: batchCount
+            });
+        } catch (error) {
+            setGenerationError(error instanceof Error ? error.message : 'Unable to start image editing.');
+        }
     };
 
     const handleModelChange = (modelId: string) => {
@@ -818,6 +850,11 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
 
             {/* Bottom Floating Controls */}
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-3 w-full max-w-6xl px-4 pointer-events-none">
+                {generationError && (
+                    <div className="rounded-md border border-red-500/40 bg-red-950/80 px-3 py-2 text-xs text-red-200 shadow-lg pointer-events-auto">
+                        {generationError}
+                    </div>
+                )}
                 {/* Floating Tools Palette */}
                 <BottomToolbar
                     isSelectMode={selection.isSelectMode}
@@ -859,6 +896,8 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                     setShowResolutionDropdown={setShowResolutionDropdown}
                     batchCount={batchCount}
                     setBatchCount={setBatchCount}
+                    editMode={selectedEditMode}
+                    onEditModeChange={setSelectedEditMode}
                     onGenerate={handleGenerateClick}
                     hasInputImage={hasInputImage}
                 />

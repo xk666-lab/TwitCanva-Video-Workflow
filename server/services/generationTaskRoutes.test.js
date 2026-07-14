@@ -185,6 +185,92 @@ test('POST generation-tasks derives provider data and materializes data URLs bef
     );
 });
 
+test('POST generation-tasks accepts edit-image with a persisted local source and provenance', async t => {
+    const libraryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'twitcanva-edit-task-route-'));
+    t.after(() => fs.rmSync(libraryDir, { recursive: true, force: true }));
+    let receivedSubmission;
+    const server = await startTestServer({
+        async submitTask(submission) {
+            receivedSubmission = submission;
+            return { task: createTask({
+                operation: submission.operation,
+                provider: submission.provider,
+                model: submission.model,
+                inputSnapshot: submission.inputSnapshot
+            }), reused: false };
+        }
+    }, libraryDir);
+    t.after(server.close);
+
+    const pixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB';
+    const response = await fetch(`${server.baseUrl}/api/generation-tasks`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            workflowId: 'workflow-1',
+            nodeId: 'derived-image-1',
+            operation: 'edit-image',
+            inputSnapshot: {
+                prompt: 'Replace the backdrop with a paper theatre.',
+                imageBase64: pixel,
+                imageModel: 'gpt-image-2',
+                imageEdit: {
+                    mode: 'prompt-edit',
+                    sourceNodeId: 'editor-1',
+                    sourceTakeId: 'take-source-1',
+                    editorNodeId: 'editor-1'
+                },
+                apiKey: 'must-not-be-persisted'
+            }
+        })
+    });
+
+    assert.equal(response.status, 202);
+    assert.equal(receivedSubmission.operation, 'edit-image');
+    assert.equal(receivedSubmission.provider, 'openai');
+    assert.equal(receivedSubmission.model, 'gpt-image-2');
+    assert.match(receivedSubmission.inputSnapshot.imageBase64, /^\/library\/images\//);
+    assert.deepEqual(receivedSubmission.inputSnapshot.imageEdit, {
+        mode: 'prompt-edit',
+        sourceNodeId: 'editor-1',
+        sourceTakeId: 'take-source-1',
+        editorNodeId: 'editor-1'
+    });
+    assert.equal(receivedSubmission.inputSnapshot.apiKey, undefined);
+});
+
+test('POST generation-tasks rejects edit-image without a source image', async t => {
+    const libraryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'twitcanva-edit-task-route-'));
+    t.after(() => fs.rmSync(libraryDir, { recursive: true, force: true }));
+    let submissions = 0;
+    const server = await startTestServer({
+        async submitTask() {
+            submissions += 1;
+            return { task: createTask(), reused: false };
+        }
+    }, libraryDir);
+    t.after(server.close);
+
+    const response = await fetch(`${server.baseUrl}/api/generation-tasks`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            nodeId: 'derived-image-1',
+            operation: 'edit-image',
+            inputSnapshot: {
+                prompt: 'Change the scene.',
+                imageModel: 'gpt-image-2',
+                imageEdit: { mode: 'prompt-edit', sourceNodeId: 'editor-1' }
+            }
+        })
+    });
+
+    assert.equal(response.status, 400);
+    assert.equal(submissions, 0);
+    const body = await response.json();
+    assert.match(body.error.message, /source image/i);
+});
+
 test('POST generation-tasks accepts the existing local image operation without adding a new provider model', async t => {
     const libraryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'twitcanva-task-route-'));
     t.after(() => fs.rmSync(libraryDir, { recursive: true, force: true }));
@@ -384,7 +470,14 @@ test('restart reconciliation only adopts media metadata written for the interrup
         prompt: 'Recovered',
         model: 'gpt-image-2',
         createdAt: '2026-01-01T00:00:00.000Z',
-        mediaType: 'image'
+        mediaType: 'image',
+        metadata: {
+            operation: 'edit-image',
+            mode: 'expand',
+            sourceNodeId: 'editor-1',
+            sourceTakeId: 'take-source-1',
+            sourceUrl: '/library/images/source.png'
+        }
     }));
     fs.writeFileSync(path.join(imagesDir, 'take-newer.json'), JSON.stringify({
         takeId: 'take-newer',
@@ -408,6 +501,16 @@ test('restart reconciliation only adopts media metadata written for the interrup
 
     assert.equal(recovered.resultUrl, '/library/images/result.png');
     assert.equal(recovered.take.id, 'take-1');
+    assert.deepEqual(recovered.take.metadata, {
+        operation: 'edit-image',
+        mode: 'expand',
+        sourceNodeId: 'editor-1',
+        sourceTakeId: 'take-source-1',
+        sourceUrl: '/library/images/source.png',
+        filename: 'result.png',
+        aspectRatio: undefined,
+        resolution: undefined
+    });
     assert.equal(unrelated, null);
 });
 

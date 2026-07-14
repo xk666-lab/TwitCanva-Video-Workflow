@@ -13,12 +13,12 @@ import { CanvasNode } from './components/canvas/CanvasNode';
 import { ConnectionsLayer } from './components/canvas/ConnectionsLayer';
 import { ContextMenu } from './components/ContextMenu';
 import { ContextMenuState, NodeData, NodeGroup, NodeStatus, NodeType } from './types';
-import { submitImageGeneration } from './services/generationService';
 import { useCanvasNavigation } from './hooks/useCanvasNavigation';
 import { useNodeManagement } from './hooks/useNodeManagement';
 import { useConnectionDragging } from './hooks/useConnectionDragging';
 import { useNodeDragging } from './hooks/useNodeDragging';
 import { useGeneration } from './hooks/useGeneration';
+import { useImageEditGeneration } from './hooks/useImageEditGeneration';
 import { useSelectionBox } from './hooks/useSelectionBox';
 import { useGroupManagement } from './hooks/useGroupManagement';
 import { useHistory } from './hooks/useHistory';
@@ -60,25 +60,6 @@ import { isSeedanceVideoModel } from './utils/videoModelRouting';
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
-
-// Helper to convert URL/Blob to Base64
-const urlToBase64 = async (url: string): Promise<string> => {
-  if (url.startsWith('data:image')) return url;
-
-  try {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  } catch (e) {
-    console.error("Error converting URL to base64:", e);
-    return "";
-  }
-};
 
 export default function App() {
   // ============================================================================
@@ -157,6 +138,7 @@ export default function App() {
     applyNodeUpdates,
     deleteNode,
     deleteNodes,
+    addEdge,
     removeEdge,
     replaceGraph,
     validateAndAddEdge,
@@ -312,6 +294,14 @@ export default function App() {
     updateNode
   });
 
+  const { handleImageEditGeneration } = useImageEditGeneration({
+    nodes,
+    workflowId,
+    setNodes,
+    addEdge,
+    updateNode
+  });
+
   // Keep a ref to handleGenerate so setTimeout callbacks can access the latest version
   const handleGenerateRef = React.useRef(handleGenerate);
   React.useEffect(() => {
@@ -337,7 +327,7 @@ export default function App() {
     handleOpenImageEditor,
     handleCloseImageEditor,
     handleUpload
-  } = useImageEditor({ nodes, updateNode });
+  } = useImageEditor({ nodes, edges, updateNode });
 
   // Video editor modal
   const {
@@ -1404,80 +1394,12 @@ export default function App() {
         initialCanvasData={nodes.find(n => n.id === editorModal.nodeId)?.editorCanvasData}
         initialCanvasSize={nodes.find(n => n.id === editorModal.nodeId)?.editorCanvasSize}
         initialBackgroundUrl={nodes.find(n => n.id === editorModal.nodeId)?.editorBackgroundUrl}
+        initialEditMode={nodes.find(n => n.id === editorModal.nodeId)?.imageEditMode}
+        source={editorModal.source}
         onClose={handleCloseImageEditor}
-        onGenerate={async (sourceId, prompt, count) => {
+        onGenerate={async request => {
+          await handleImageEditGeneration(request);
           handleCloseImageEditor();
-
-          const sourceNode = nodes.find(n => n.id === sourceId);
-          if (!sourceNode) return;
-
-          // Get settings from source node (which were updated by the modal)
-          const imageModel = sourceNode.imageModel || 'gpt-image-2';
-          const aspectRatio = sourceNode.aspectRatio || 'Auto';
-          const resolution = sourceNode.resolution || '1K';
-
-          const startX = sourceNode.x + 360; // Source width + gap
-          const startY = sourceNode.y;
-
-          const newNodes: NodeData[] = [];
-
-          const yStep = 500;
-          const totalHeight = (count - 1) * yStep;
-          const startYOffset = -totalHeight / 2;
-
-          // Create N nodes with inherited settings
-          for (let i = 0; i < count; i++) {
-            newNodes.push({
-              ...createDefaultNodeData(NodeType.IMAGE),
-              id: crypto.randomUUID(),
-              x: startX,
-              y: startY + startYOffset + (i * yStep),
-              prompt: prompt,
-              status: NodeStatus.LOADING,
-              model: 'Banana Pro',
-              imageModel: imageModel,
-              aspectRatio: aspectRatio,
-              resolution: resolution,
-              parentIds: [sourceId]
-            });
-          }
-
-          // Add new nodes and edges immediately
-          // Note: State updates might be batched
-          setNodes(prev => [...prev, ...newNodes]);
-
-          // Convert editor image to base64 for generation reference
-          let imageBase64: string | undefined = undefined;
-          if (editorModal.imageUrl) {
-            imageBase64 = await urlToBase64(editorModal.imageUrl);
-          }
-
-          newNodes.forEach(async (node) => {
-            try {
-              await submitImageGeneration({
-                prompt: node.prompt || '',
-                imageBase64: imageBase64,
-                imageModel: imageModel,
-                aspectRatio: aspectRatio,
-                resolution: resolution,
-                nodeId: node.id
-              }, {
-                workflowId,
-                onTaskCreated: task => updateNode(node.id, {
-                  status: NodeStatus.LOADING,
-                  activeTaskId: task.taskId,
-                  generationStartTime: Date.now()
-                })
-              });
-            } catch (error: any) {
-              updateNode(node.id, {
-                status: NodeStatus.ERROR,
-                errorMessage: error.message,
-                activeTaskId: undefined,
-                generationStartTime: undefined
-              });
-            }
-          });
         }}
         onUpdate={updateNode}
       />
