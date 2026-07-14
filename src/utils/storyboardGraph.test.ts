@@ -15,6 +15,7 @@ import {
   syncBoundStoryboardGroupContexts,
   syncLegacyStoryboardContexts
 } from '../domain/storyboard/storyboardGraph.ts';
+import { createEmptyStoryboardDocument } from '../domain/storyboard/storyboardDocuments.ts';
 import { applyNodeUpdateMap } from '../domain/nodes/nodeUpdates.ts';
 
 const NOW = '2026-07-14T00:00:00.000Z';
@@ -520,4 +521,38 @@ test('bound story context sync updates only its pair and preserves unknown legac
     scriptData,
     storyboardData
   }), synced);
+});
+
+test('video linkage is keyed by source image id rather than array position', () => {
+  const document = {
+    ...createEmptyStoryboardDocument({ sourceScriptNodeId: 'script-1', now: NOW }),
+    shots: [
+      {
+        id: 'shot-a',
+        order: 0,
+        sceneNumber: 1,
+        description: 'A',
+        cameraAngle: 'Wide',
+        mood: '',
+        imageNodeId: 'image-a',
+        status: 'image-ready' as const,
+        revision: 0
+      },
+      {
+        id: 'shot-b',
+        order: 1,
+        sceneNumber: 2,
+        description: 'B',
+        cameraAngle: 'Close-up',
+        mood: '',
+        imageNodeId: 'image-b',
+        status: 'image-ready' as const,
+        revision: 0
+      }
+    ]
+  };
+  const linked = attachVideoNodesToShots(document, new Map([['image-b', 'video-b']]), NOW);
+
+  assert.equal(linked.shots[0].videoNodeId, undefined);
+  assert.equal(linked.shots[1].videoNodeId, 'video-b');
 });

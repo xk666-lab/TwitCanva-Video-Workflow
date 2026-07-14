@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Type,
+  BookOpenText,
   Image as ImageIcon,
   Video,
   Film,
@@ -16,6 +17,7 @@ import {
   Copy,
   Files,
   Layers,
+  PanelsTopLeft,
   ChevronRight,
   HardDrive
 } from 'lucide-react';
@@ -294,6 +296,20 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           label={isConnector ? "文本生成" : "文本"}
           desc={isConnector ? "脚本、文案、品牌文本" : undefined}
           onClick={() => onSelectType(NodeType.TEXT)}
+          canvasTheme={canvasTheme}
+        />
+        <MenuItem
+          icon={<BookOpenText size={18} />}
+          label="脚本"
+          desc="持久化故事与视觉设定"
+          onClick={() => onSelectType(NodeType.SCRIPT)}
+          canvasTheme={canvasTheme}
+        />
+        <MenuItem
+          icon={<PanelsTopLeft size={18} />}
+          label="分镜管理器"
+          desc="管理结构化镜头与生成结果"
+          onClick={() => onSelectType(NodeType.STORYBOARD)}
           canvasTheme={canvasTheme}
         />
         <MenuItem

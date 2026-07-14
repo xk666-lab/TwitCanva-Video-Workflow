@@ -20,6 +20,9 @@ interface CanvasNodeProps {
   onGenerate: (id: string) => void;
   onCancelGeneration?: (id: string) => void;
   onRetryGeneration?: (id: string) => void;
+  onOpenStoryNode?: (nodeId: string) => void;
+  onCancelStoryTask?: (nodeId: string) => void;
+  onRetryStoryTask?: (nodeId: string) => void;
   onAddNext: (id: string, type: 'left' | 'right') => void;
   selected: boolean;
   showControls?: boolean; // Only show controls when single node is selected (not in group selection)
@@ -60,6 +63,9 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
   onGenerate,
   onCancelGeneration,
   onRetryGeneration,
+  onOpenStoryNode,
+  onCancelStoryTask,
+  onRetryStoryTask,
   onAddNext,
   selected,
   showControls = true, // Default to true for backward compatibility
@@ -914,12 +920,15 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
             onImageToVideo={onImageToVideo}
             onUpdate={onUpdate}
             onPostToX={onPostToX}
+            onOpenStoryNode={onOpenStoryNode}
+            onCancelStoryTask={onCancelStoryTask}
+            onRetryStoryTask={onRetryStoryTask}
           />
         </div>
 
         {/* Control Panel - Only show when single node is selected (not in group selection) */}
         {/* Hide controls for storyboard-generated scenes */}
-        {selected && showControls && data.type !== NodeType.TEXT && !(data.prompt && data.prompt.startsWith('Extract panel #')) && (
+        {selected && showControls && data.type !== NodeType.TEXT && data.type !== NodeType.SCRIPT && data.type !== NodeType.STORYBOARD && !(data.prompt && data.prompt.startsWith('Extract panel #')) && (
           <div className="absolute top-[calc(100%+12px)] left-1/2 -translate-x-1/2 w-[600px] flex justify-center z-[100]">
             <NodeControls
               data={data}

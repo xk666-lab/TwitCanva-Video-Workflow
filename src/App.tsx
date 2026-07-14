@@ -53,6 +53,7 @@ import { useTikTokImport } from './hooks/useTikTokImport';
 import { useStoryboardGenerator } from './hooks/useStoryboardGenerator';
 import { StoryboardGeneratorModal } from './components/modals/StoryboardGeneratorModal';
 import { StoryboardVideoModal } from './components/modals/StoryboardVideoModal';
+import { attachVideoNodesToShots, getEffectiveStoryContext } from './domain/storyboard/storyboardGraph';
 import { getStoryboardVideoReadiness } from './utils/storyboardFlow';
 import { isSeedanceVideoModel } from './utils/videoModelRouting';
 
@@ -545,7 +546,7 @@ export default function App() {
     // Check if nodes belong to a group with story context
     const firstNode = selectedImageNodes[0];
     const group = firstNode.groupId ? groups.find(g => g.id === firstNode.groupId) : undefined;
-    const storyContext = group?.storyContext;
+    const storyContext = group ? getEffectiveStoryContext(group, nodes) : undefined;
 
     if (storyContext) {
       console.log('[App] Found Story Context for Video Modal:', {
@@ -635,6 +636,29 @@ export default function App() {
     // added new nodes to state
     setNodes(prev => [...prev, ...newNodes]);
 
+    const videoByImage = new Map(
+      sourceNodes.map((sourceNode, index) => [sourceNode.id, newNodes[index].id])
+    );
+    const context = storyboardVideoModal.storyContext;
+    const storyboardNode = context?.storyboardNodeId
+      ? nodes.find(node => node.id === context.storyboardNodeId)
+      : undefined;
+    if (storyboardNode?.storyboardData) {
+      const withPrompts = {
+        ...storyboardNode.storyboardData,
+        shots: storyboardNode.storyboardData.shots.map(shot =>
+          shot.imageNodeId && prompts[shot.imageNodeId]
+            ? { ...shot, videoPrompt: prompts[shot.imageNodeId] }
+            : shot
+        )
+      };
+      applyNodeUpdates({
+        [storyboardNode.id]: {
+          storyboardData: attachVideoNodesToShots(withPrompts, videoByImage)
+        }
+      });
+    }
+
     // Auto-trigger generation (staggered)
     setTimeout(() => {
       newNodes.forEach((node, index) => {
@@ -644,7 +668,7 @@ export default function App() {
       });
     }, 500);
 
-  }, [storyboardVideoModal.nodes, setNodes]);
+  }, [applyNodeUpdates, nodes, setNodes, storyboardVideoModal.nodes, storyboardVideoModal.storyContext]);
 
   // Twitter Post Modal State
   const [twitterModal, setTwitterModal] = useState<{
@@ -1195,6 +1219,9 @@ export default function App() {
                 onGenerate={handleGenerate}
                 onCancelGeneration={handleCancelGeneration}
                 onRetryGeneration={handleRetryGeneration}
+                onOpenStoryNode={storyboardGenerator.openNode}
+                onCancelStoryTask={storyboardGenerator.cancelTaskForNode}
+                onRetryStoryTask={storyboardGenerator.retryTaskForNode}
                 onAddNext={handleAddNext}
                 selected={selectedNodeIds.includes(node.id)}
                 showControls={selectedNodeIds.length === 1 && selectedNodeIds.includes(node.id)}

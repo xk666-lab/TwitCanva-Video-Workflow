@@ -8,6 +8,8 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Loader2, Maximize2, ImageIcon as ImageIcon, Film, Upload, Pencil, Video, GripVertical, Download, Expand, Shrink, HardDrive } from 'lucide-react';
 import { NodeData, NodeStatus, NodeType } from '../../types';
+import { ScriptNodeContent } from './ScriptNodeContent';
+import { StoryboardNodeContent } from './StoryboardNodeContent';
 
 interface NodeContentProps {
     data: NodeData;
@@ -31,6 +33,10 @@ interface NodeContentProps {
     onUpdate?: (nodeId: string, updates: Partial<NodeData>) => void;
     // Social sharing
     onPostToX?: (nodeId: string, mediaUrl: string, mediaType: 'image' | 'video') => void;
+    // Story node callbacks
+    onOpenStoryNode?: (nodeId: string) => void;
+    onCancelStoryTask?: (nodeId: string) => void;
+    onRetryStoryTask?: (nodeId: string) => void;
 }
 
 export const NodeContent: React.FC<NodeContentProps> = ({
@@ -51,7 +57,10 @@ export const NodeContent: React.FC<NodeContentProps> = ({
     onImageToImage,
     onImageToVideo,
     onUpdate,
-    onPostToX
+    onPostToX,
+    onOpenStoryNode,
+    onCancelStoryTask,
+    onRetryStoryTask
 }) => {
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -107,6 +116,28 @@ export const NodeContent: React.FC<NodeContentProps> = ({
         };
         reader.readAsDataURL(file);
     };
+
+    if (data.type === NodeType.SCRIPT) {
+        return (
+            <ScriptNodeContent
+                data={data}
+                onOpen={onOpenStoryNode || (() => undefined)}
+                onCancel={onCancelStoryTask || (() => undefined)}
+                onRetry={onRetryStoryTask || (() => undefined)}
+            />
+        );
+    }
+
+    if (data.type === NodeType.STORYBOARD) {
+        return (
+            <StoryboardNodeContent
+                data={data}
+                onOpen={onOpenStoryNode || (() => undefined)}
+                onCancel={onCancelStoryTask || (() => undefined)}
+                onRetry={onRetryStoryTask || (() => undefined)}
+            />
+        );
+    }
 
     return (
         <div className={`transition-all duration-200 ${!selected ? 'p-0 rounded-2xl overflow-hidden' : 'p-1'}`}>
