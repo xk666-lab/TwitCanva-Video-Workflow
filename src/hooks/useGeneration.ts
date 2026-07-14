@@ -20,12 +20,18 @@ import { isSeedanceVideoModel } from '../utils/videoModelRouting';
 import type { CanvasEdge } from '../domain/graph/graphTypes';
 import {
     getConnectedImageInputs,
+    getConnectedSubjectInputs,
     getConnectedTextInputs,
     getEndFrameInput,
     getMotionReferenceInput,
     getReferenceImageInputs,
     getStartFrameInput
 } from '../domain/graph/connectionSelectors';
+import {
+    buildSubjectReferenceSnapshots,
+    getSubjectReferenceUrls
+} from '../domain/subjects/subjectAsset.ts';
+import { resolveSubjectAssets } from '../services/subjectAssetService.ts';
 
 interface UseGenerationProps {
     nodes: NodeData[];
@@ -37,6 +43,14 @@ interface UseGenerationProps {
 export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGenerationProps) => {
     const nodesRef = useRef(nodes);
     nodesRef.current = nodes;
+
+    const getSubjectReferences = async (targetNode: NodeData) => {
+        const subjectAssetIds = getConnectedSubjectInputs(targetNode, nodes, edges)
+            .map(input => input.subjectAssetId)
+            .filter((id): id is string => Boolean(id));
+        if (subjectAssetIds.length === 0) return [];
+        return buildSubjectReferenceSnapshots(await resolveSubjectAssets(subjectAssetIds));
+    };
 
     // ============================================================================
     // GENERATION HANDLER
@@ -90,6 +104,7 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
             if (node.type === NodeType.IMAGE || node.type === NodeType.IMAGE_EDITOR) {
                 // Collect ALL parent images for multi-input generation
                 const imageBase64s: string[] = [];
+                const subjectReferences = await getSubjectReferences(node);
 
                 // Traverse each typed image input until a generated image is found.
                 for (const input of connectedImageInputs) {
@@ -115,6 +130,11 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
                     }
                 }
 
+                for (const subjectUrl of getSubjectReferenceUrls(subjectReferences, 14)) {
+                    if (imageBase64s.length >= 14) break;
+                    if (!imageBase64s.includes(subjectUrl)) imageBase64s.push(subjectUrl);
+                }
+
                 // Generate image with all parent images and character references
                 await submitImageGeneration({
                     prompt: combinedPrompt,
@@ -126,7 +146,8 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
                     // Kling V1.5 reference settings
                     klingReferenceMode: node.klingReferenceMode,
                     klingFaceIntensity: node.klingFaceIntensity,
-                    klingSubjectIntensity: node.klingSubjectIntensity
+                    klingSubjectIntensity: node.klingSubjectIntensity,
+                    ...(subjectReferences.length > 0 ? { subjectReferences } : {})
                 }, generationRequestOptions);
                 return;
 
@@ -156,6 +177,8 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
             } else if (node.type === NodeType.VIDEO) {
                 let imageBase64: string | string[] | undefined;
                 let lastFrameBase64: string | undefined;
+                const subjectReferences = await getSubjectReferences(node);
+                const subjectReferenceUrls = getSubjectReferenceUrls(subjectReferences, 14);
                 const isSeedanceModel = isSeedanceVideoModel(node.videoModel);
                 const requestedDuration = isSeedanceModel ? undefined : node.videoDuration;
                 const referenceImageInputs = getReferenceImageInputs(node, nodes, edges);
@@ -170,6 +193,7 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
                     .filter(input => input.type === NodeType.IMAGE)
                     .map(inputImageValue)
                     .filter((url): url is string => Boolean(url));
+                const seedanceReferences = [...new Set([...seedanceReferenceImages, ...subjectReferenceUrls])].slice(0, 14);
                 const motionReferenceUrl = node.videoModel === 'kling-v2-6'
                     ? motionReferenceInput?.resultUrl
                     : undefined;
@@ -180,8 +204,8 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
                 const isFrameToFrame = !isSeedanceModel && !isMotionControl &&
                     (node.videoMode === 'frame-to-frame' || hasStartAndEndFrames);
 
-                if (isSeedanceModel && seedanceReferenceImages.length > 0) {
-                    imageBase64 = seedanceReferenceImages;
+                if (isSeedanceModel && seedanceReferences.length > 0) {
+                    imageBase64 = seedanceReferences;
                 } else if (isFrameToFrame && startFrameInput && endFrameInput) {
                     imageBase64 = inputImageValue(startFrameInput);
                     lastFrameBase64 = inputImageValue(endFrameInput);
@@ -195,6 +219,10 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
                     }
                 }
 
+                if (!imageBase64 && subjectReferenceUrls[0]) {
+                    imageBase64 = subjectReferenceUrls[0];
+                }
+
                 await submitVideoGeneration({
                     prompt: combinedPrompt,
                     imageBase64,
@@ -205,7 +233,8 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
                     videoModel: node.videoModel,
                     motionReferenceUrl,
                     generateAudio: node.generateAudio, // For Kling 2.6 and Veo 3.1 native audio
-                    nodeId: id
+                    nodeId: id,
+                    ...(subjectReferences.length > 0 ? { subjectReferences } : {})
                 }, generationRequestOptions);
                 return;
 

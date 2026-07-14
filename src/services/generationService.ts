@@ -9,6 +9,7 @@
 
 import type { GenerationTask } from '../domain/generation/generationTask.ts';
 import type { GenerateStoryPackageTaskInput } from '../domain/storyboard/storyboardTypes.ts';
+import type { SubjectReferenceSnapshot } from '../domain/subjects/subjectAsset.ts';
 import type { MediaTake } from '../types';
 import { apiGet, apiPost } from './apiClient.ts';
 
@@ -23,6 +24,7 @@ export interface GenerateImageParams {
   klingReferenceMode?: 'subject' | 'face';
   klingFaceIntensity?: number; // 0-100
   klingSubjectIntensity?: number; // 0-100
+  subjectReferences?: SubjectReferenceSnapshot[];
 }
 
 export interface GenerateVideoParams {
@@ -34,6 +36,7 @@ export interface GenerateVideoParams {
   duration?: number; // Video duration in seconds (e.g., 5, 6, 8, 10)
   videoModel?: string; // Video model version (e.g., 'veo-3.1', 'kling-v2-1')
   motionReferenceUrl?: string; // For Kling 2.6 motion control
+  subjectReferences?: SubjectReferenceSnapshot[];
   generateAudio?: boolean; // For Kling 2.6 and Veo 3.1 native audio (default: true)
   nodeId?: string; // ID of the node initiating generation
 }

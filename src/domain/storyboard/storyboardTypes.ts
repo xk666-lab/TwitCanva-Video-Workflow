@@ -5,6 +5,7 @@ export interface StoryReferenceAsset {
   id: string;
   name: string;
   url: string;
+  subjectAssetId?: string;
   description?: string;
   category?: string;
   [key: string]: unknown;

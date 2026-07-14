@@ -41,3 +41,20 @@ test('script and storyboard expose active typed ports', () => {
   assert.ok(getInputPorts('分镜管理器').every(port => port.enabled !== false));
   assert.ok(getOutputPorts('分镜管理器').every(port => port.enabled !== false));
 });
+
+test('subject node and supported targets expose active multi-subject ports', () => {
+  const output = getNodePort('主体', 'subject-output');
+
+  assert.equal(output?.direction, 'output');
+  assert.equal(output?.dataType, 'subject');
+  assert.equal(output?.multiple, true);
+
+  for (const type of ['图片', '视频', '脚本', '分镜管理器']) {
+    const input = getNodePort(type, 'subject-references');
+    assert.equal(input?.direction, 'input', type);
+    assert.equal(input?.label, '主体参考', type);
+    assert.equal(input?.dataType, 'subject', type);
+    assert.equal(input?.enabled, true, type);
+    assert.equal(input?.multiple, true, type);
+  }
+});

@@ -11,6 +11,8 @@ import type { StoryboardState } from '../../hooks/useStoryboardGenerator';
 import type { CharacterAsset, SceneScript } from '../../domain/storyboard/storyboardTypes';
 import { StoryInput } from '../StoryInput';
 import { getStoryboardImageModelName, STORYBOARD_IMAGE_MODELS } from '../../utils/storyboardModelOptions';
+import { apiGet } from '../../services/apiClient';
+import { listSubjectAssets } from '../../services/subjectAssetService';
 
 // ============================================================================
 // TYPES
@@ -99,22 +101,38 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
         const fetchAssets = async () => {
             setIsLoadingAssets(true);
             try {
-                const response = await fetch('/api/library');
-                if (response.ok) {
-                    const assets = await response.json();
-                    // Filter to show all image assets and include category info
-                    const imageAssets = assets
-                        .filter((a: any) => a.type === 'image')
-                        .map((a: any) => ({
-                            id: a.id,
-                            name: a.name,
-                            url: a.url,
-                            description: a.description || '',
-                            category: a.category || 'Others'
-                        }));
-                    setCharacterAssets(imageAssets);
-                    setSelectedCategory('All');
+                const assets = await apiGet<Array<{
+                    id: string;
+                    name: string;
+                    url: string;
+                    type: string;
+                    description?: string;
+                    category?: string;
+                }>>('/api/library');
+                const imageAssets = assets
+                    .filter(asset => asset.type === 'image')
+                    .map(asset => ({
+                        id: asset.id,
+                        name: asset.name,
+                        url: asset.url,
+                        description: asset.description || '',
+                        category: asset.category || 'Others'
+                    }));
+                let subjectAssets: (CharacterAsset & { category: string })[] = [];
+                try {
+                    subjectAssets = (await listSubjectAssets()).map(asset => ({
+                        id: asset.id,
+                        subjectAssetId: asset.id,
+                        name: asset.name,
+                        url: asset.url,
+                        description: asset.description || '',
+                        category: '主体资产'
+                    }));
+                } catch (subjectError) {
+                    console.warn('[StoryboardModal] Failed to fetch subject assets:', subjectError);
                 }
+                setCharacterAssets([...subjectAssets, ...imageAssets]);
+                setSelectedCategory('All');
             } catch (error) {
                 console.error('[StoryboardModal] Failed to fetch assets:', error);
             } finally {

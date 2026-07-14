@@ -82,6 +82,23 @@ test('script normalization does not mutate its input', () => {
   assert.equal((normalized as Record<string, unknown>).futureField, 'kept');
 });
 
+test('script normalization preserves a stable subject asset reference', () => {
+  const script = normalizeScriptDocument({
+    referenceAssets: [{
+      id: 'subject-asset-1',
+      subjectAssetId: 'subject-asset-1',
+      name: 'Paper Fox',
+      url: '/library/subject-assets/paper-fox.png',
+      description: 'A folded paper fox'
+    }]
+  }, { now: NOW });
+  const session = sessionFromDocuments(script, createEmptyStoryboardDocument({ now: NOW }));
+
+  assert.equal(script.referenceAssets[0].subjectAssetId, 'subject-asset-1');
+  assert.equal(session.selectedCharacters[0].subjectAssetId, 'subject-asset-1');
+  assert.equal(session.selectedCharacters[0].url, '/library/subject-assets/paper-fox.png');
+});
+
 test('session edits advance only the document whose persistent fields changed', () => {
   const script = createEmptyScriptDocument({ sourceText: 'Old story', now: NOW });
   const storyboard = {

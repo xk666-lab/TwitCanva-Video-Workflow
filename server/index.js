@@ -19,6 +19,7 @@ import storyboardRoutes from './routes/storyboard.js';
 import workflowRoutes from './routes/workflows.js';
 import libraryRoutes from './routes/library.js';
 import assetRoutes from './routes/assets.js';
+import subjectAssetRoutes from './routes/subject-assets.js';
 import mediaToolRoutes from './routes/media-tools.js';
 import chatRoutes from './routes/chat.js';
 import { createGenerationTaskManager } from './services/generationTasks.js';
@@ -291,6 +292,7 @@ app.use('/api/storyboard', storyboardRoutes);
 app.use('/api', workflowRoutes);
 app.use('/api', libraryRoutes);
 app.use('/api', assetRoutes);
+app.use('/api', subjectAssetRoutes);
 app.use('/api', mediaToolRoutes);
 app.use('/api', chatRoutes);
 

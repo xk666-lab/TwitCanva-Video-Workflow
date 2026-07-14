@@ -37,6 +37,10 @@ function finiteNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+function normalizeSubjectAssetId(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+}
+
 function storyDocumentMigrationNow(node: NodeData): string {
   const record = node as unknown as UnknownRecord;
   return typeof record.createdAt === 'string'
@@ -71,6 +75,8 @@ function cloneNode(rawNode: unknown): UnknownRecord {
 function migrateNode(rawNode: unknown, index: number, warn: (message: string) => void): NodeData {
   const cloned = cloneNode(rawNode);
   const candidate = normalizeWorkflowNode(cloned as unknown as NodeData);
+  const { subjectAssetId: rawSubjectAssetId, ...candidateWithoutSubjectAssetId } = candidate;
+  const subjectAssetId = normalizeSubjectAssetId(rawSubjectAssetId);
   const normalizedType = candidate.type;
   const knownType = isKnownNodeType(normalizedType);
 
@@ -90,7 +96,7 @@ function migrateNode(rawNode: unknown, index: number, warn: (message: string) =>
 
   const node = {
     ...defaults,
-    ...candidate,
+    ...candidateWithoutSubjectAssetId,
     id: typeof candidate.id === 'string' && candidate.id ? candidate.id : `legacy-node-${index + 1}`,
     type: normalizedType || ('Unknown Node' as NodeData['type']),
     x: finiteNumber(candidate.x, 0),
@@ -100,7 +106,8 @@ function migrateNode(rawNode: unknown, index: number, warn: (message: string) =>
     model: typeof candidate.model === 'string' ? candidate.model : defaults.model,
     aspectRatio: typeof candidate.aspectRatio === 'string' ? candidate.aspectRatio : defaults.aspectRatio,
     resolution: typeof candidate.resolution === 'string' ? candidate.resolution : defaults.resolution,
-    parentIds: Array.isArray(candidate.parentIds) ? [...candidate.parentIds] : []
+    parentIds: Array.isArray(candidate.parentIds) ? [...candidate.parentIds] : [],
+    ...(subjectAssetId ? { subjectAssetId } : {})
   } as NodeData;
 
   const takeNormalized = normalizeLegacyNodeTakes(node);

@@ -18,6 +18,7 @@ import {
   Files,
   Layers,
   PanelsTopLeft,
+  UserRound,
   ChevronRight,
   HardDrive
 } from 'lucide-react';
@@ -312,6 +313,15 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           onClick={() => onSelectType(NodeType.STORYBOARD)}
           canvasTheme={canvasTheme}
         />
+        {!isConnector && (
+          <MenuItem
+            icon={<UserRound size={18} />}
+            label="主体"
+            desc="复用角色、产品或场景参考"
+            onClick={() => onSelectType(NodeType.SUBJECT)}
+            canvasTheme={canvasTheme}
+          />
+        )}
         <MenuItem
           icon={<ImageIcon size={18} />}
           label={isConnector ? "图片生成" : "图片"}

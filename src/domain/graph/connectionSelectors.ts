@@ -1,4 +1,5 @@
 import type { NodeData } from '../../types';
+import { getNodePort } from '../nodes/nodeRegistry.ts';
 import type { CanvasEdge } from './graphTypes.ts';
 import { getIncomingEdges, getInputEdgesByPort } from './edgeMigration.ts';
 
@@ -16,6 +17,15 @@ function legacyParents(targetNode: NodeData, nodes: NodeData[]): NodeData[] {
   return (targetNode.parentIds || [])
     .map(id => lookup.get(id))
     .filter((node): node is NodeData => Boolean(node));
+}
+
+function isValidSubjectSource(sourceNode: NodeData, edge: CanvasEdge): boolean {
+  if (String(sourceNode.type) !== '主体' || edge.dataType !== 'subject') return false;
+
+  const sourcePort = getNodePort(sourceNode.type, edge.sourcePortId);
+  return sourcePort?.id === 'subject-output' &&
+    sourcePort.direction === 'output' &&
+    sourcePort.dataType === 'subject';
 }
 
 export function getConnectedTextInputs(
@@ -43,6 +53,26 @@ export function getConnectedImageInputs(
     return sourceNodesForEdges(incoming.filter(edge => edge.dataType === 'image'), nodes);
   }
   return legacyParents(targetNode, nodes).filter(node => String(node.type) !== '文本');
+}
+
+export function getConnectedSubjectInputs(
+  targetNode: NodeData,
+  nodes: NodeData[],
+  edges: CanvasEdge[]
+): NodeData[] {
+  const targetPort = getNodePort(targetNode.type, 'subject-references');
+  if (!targetPort || targetPort.direction !== 'input' || targetPort.dataType !== 'subject') return [];
+
+  const incoming = getIncomingEdges(edges, targetNode.id);
+  if (incoming.length > 0) {
+    const nodesById = nodeById(nodes);
+    const subjectEdges = getInputEdgesByPort(edges, targetNode.id, 'subject-references').filter(edge => {
+      const sourceNode = nodesById.get(edge.sourceNodeId);
+      return sourceNode ? isValidSubjectSource(sourceNode, edge) : false;
+    });
+    return sourceNodesForEdges(subjectEdges, nodes);
+  }
+  return [];
 }
 
 export function getReferenceImageInputs(

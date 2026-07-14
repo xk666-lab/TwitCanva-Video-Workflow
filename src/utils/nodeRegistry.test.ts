@@ -23,7 +23,8 @@ const NODE_TYPES = [
   '分镜管理器',
   '镜头角度',
   '本地图片模型',
-  '本地视频模型'
+  '本地视频模型',
+  '主体'
 ] as NodeType[];
 
 test('registers every NodeType exactly once', () => {
@@ -92,6 +93,16 @@ test('local model defaults remain specialized', () => {
   assert.equal(video.model, 'local');
   assert.equal(video.aspectRatio, '16:9');
   assert.equal(video.videoDuration, 5);
+});
+
+test('subject defaults create a typed source node', () => {
+  const subject = createDefaultNodeData('主体' as NodeType);
+  const text = createDefaultNodeData('文本' as NodeType);
+
+  assert.equal(subject.type, '主体');
+  assert.equal(subject.model, 'subject-reference');
+  assert.equal(subject.subjectAssetId, undefined);
+  assert.equal(text.model, 'Banana Pro');
 });
 
 test('unknown values are not treated as registered node types', () => {

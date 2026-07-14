@@ -130,7 +130,7 @@ test('migration is idempotent', () => {
   assert.deepEqual(twice, once);
 });
 
-test('story documents migrate to schema version 5 without losing unknown fields', () => {
+test('story documents migrate to the current schema without losing unknown fields', () => {
   const raw = fixture('workflow-script-storyboard-v4.json');
   const once = migrateWorkflow(raw);
   const independentlyMigrated = migrateWorkflow(raw);
@@ -138,13 +138,64 @@ test('story documents migrate to schema version 5 without losing unknown fields'
   const script = once.nodes.find(node => node.id === 'script-1');
   const storyboard = once.nodes.find(node => node.id === 'storyboard-1');
 
-  assert.equal(once.schemaVersion, 5);
+  assert.equal(once.schemaVersion, CURRENT_WORKFLOW_SCHEMA_VERSION);
   assert.equal(script?.scriptData?.schemaVersion, 1);
   assert.equal((script?.scriptData as Record<string, unknown>).futureScript, true);
   assert.equal(storyboard?.storyboardData?.shots[0].id, 'legacy-shot-storyboard-1-1');
   assert.equal((storyboard?.storyboardData?.shots[0] as unknown as Record<string, unknown>).futureShot, 'kept');
   assert.equal(once.edges[0].dataType, 'script');
   assert.deepEqual(independentlyMigrated, once);
+  assert.deepEqual(twice, once);
+});
+
+test('legacy subject asset ids are normalized and migration remains idempotent', () => {
+  const raw = {
+    schemaVersion: 5,
+    id: 'legacy-subject-workflow',
+    title: 'Legacy Subject',
+    nodes: [
+      {
+        id: 'subject-valid',
+        type: '主体',
+        x: 0,
+        y: 0,
+        prompt: '',
+        status: 'idle',
+        model: 'Banana Pro',
+        aspectRatio: 'Auto',
+        resolution: 'Auto',
+        subjectAssetId: 'subject-asset-1',
+        futureSubjectField: { preserved: true }
+      },
+      {
+        id: 'subject-invalid',
+        type: '主体',
+        x: 0,
+        y: 0,
+        prompt: '',
+        status: 'idle',
+        model: 'Banana Pro',
+        aspectRatio: 'Auto',
+        resolution: 'Auto',
+        subjectAssetId: '',
+        futureSubjectField: { preserved: true }
+      }
+    ],
+    edges: [],
+    groups: [],
+    viewport: { x: 0, y: 0, zoom: 1 },
+    futureRoot: { preserved: true }
+  };
+  const snapshot = structuredClone(raw);
+  const once = migrateWorkflow(raw, { warn: () => undefined });
+  const twice = migrateWorkflow(once, { warn: () => undefined });
+
+  assert.equal(once.schemaVersion, CURRENT_WORKFLOW_SCHEMA_VERSION);
+  assert.equal(once.nodes[0].subjectAssetId, 'subject-asset-1');
+  assert.equal(once.nodes[1].subjectAssetId, undefined);
+  assert.deepEqual((once.nodes[0] as unknown as Record<string, unknown>).futureSubjectField, { preserved: true });
+  assert.deepEqual(once.futureRoot, { preserved: true });
+  assert.deepEqual(raw, snapshot);
   assert.deepEqual(twice, once);
 });
 

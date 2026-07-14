@@ -63,7 +63,12 @@ test('generateImage submits a persistent task, reports its id, and waits for ter
   const result = await generateImage({
     prompt: 'A paper city',
     imageModel: 'gpt-image-2',
-    nodeId: 'node-1'
+    nodeId: 'node-1',
+    subjectReferences: [{
+      subjectAssetId: 'subject-1',
+      name: 'Paper hero',
+      referenceImages: [{ id: 'ref-1', url: '/library/subject-assets/paper-hero.png' }]
+    }]
   }, {
     workflowId: 'workflow-1',
     pollIntervalMs: 0,
@@ -80,6 +85,7 @@ test('generateImage submits a persistent task, reports its id, and waits for ter
   const submission = JSON.parse(String(requests[0].init?.body));
   assert.equal(submission.operation, 'generate-image');
   assert.equal(submission.workflowId, 'workflow-1');
+  assert.equal(submission.inputSnapshot.subjectReferences[0].subjectAssetId, 'subject-1');
 });
 
 test('task control helpers use batch query, cancellation, and linked retry endpoints', async t => {

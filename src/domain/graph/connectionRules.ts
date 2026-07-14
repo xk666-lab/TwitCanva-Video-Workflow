@@ -120,6 +120,7 @@ function hasInputEdge(edges: CanvasEdge[], targetNodeId: string, targetPortId: s
 }
 
 const IMAGE_NODE_TYPES = new Set(['图片', '图片编辑器', '镜头角度', '本地图片模型']);
+const SUBJECT_REFERENCE_TARGET_TYPES = new Set(['图片', '视频', '脚本', '分镜管理器']);
 
 export function resolveConnectionPorts(
   sourceNode: NodeData | undefined,
@@ -132,6 +133,10 @@ export function resolveConnectionPorts(
 
   const sourceType = String(sourceNode.type);
   const targetType = String(targetNode.type);
+
+  if (sourceType === '主体' && SUBJECT_REFERENCE_TARGET_TYPES.has(targetType)) {
+    return resolved(sourceNode, 'subject-output', targetNode, 'subject-references');
+  }
 
   if (sourceType === '文本' && targetType === '脚本') {
     return resolved(sourceNode, 'text-output', targetNode, 'text-input');

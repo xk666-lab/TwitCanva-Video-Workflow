@@ -9,6 +9,7 @@ export enum NodeType {
   IMAGE = '图片',
   VIDEO = '视频',
   AUDIO = '音频',
+  SUBJECT = '主体',
   IMAGE_EDITOR = '图片编辑器',
   VIDEO_EDITOR = '视频编辑器',
   SCRIPT = '脚本',
@@ -48,6 +49,7 @@ export interface NodeData {
   prompt: string;
   status: NodeStatus;
   resultUrl?: string; // Image URL or Video URL
+  subjectAssetId?: string; // Asset selected by a Subject node
   takes?: MediaTake[]; // Generated versions for this node; resultUrl remains the legacy hero URL
   heroTakeId?: string; // Currently selected take that downstream nodes should read
   lastFrame?: string; // For Video nodes: base64/url of the last frame to use as input for next node

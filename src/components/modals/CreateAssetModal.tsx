@@ -7,6 +7,7 @@ interface CreateAssetModalProps {
     onClose: () => void;
     nodeToSnapshot: NodeData | null;
     onSave: (name: string, category: string) => Promise<void>;
+    onSaveSubject?: (input: { name: string; description?: string }) => Promise<void>;
 }
 
 const CATEGORIES = [
@@ -22,10 +23,13 @@ export const CreateAssetModal: React.FC<CreateAssetModalProps> = ({
     isOpen,
     onClose,
     nodeToSnapshot,
-    onSave
+    onSave,
+    onSaveSubject
 }) => {
     const [name, setName] = useState('我的素材');
     const [category, setCategory] = useState(CATEGORIES[0]);
+    const [subjectDescription, setSubjectDescription] = useState('');
+    const [mode, setMode] = useState<'asset' | 'subject'>('asset');
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
 
@@ -35,6 +39,8 @@ export const CreateAssetModal: React.FC<CreateAssetModalProps> = ({
             setStatus('idle');
             setName('我的素材');
             setCategory(CATEGORIES[0]);
+            setSubjectDescription('');
+            setMode('asset');
         }
     }, [isOpen]);
 
@@ -45,7 +51,12 @@ export const CreateAssetModal: React.FC<CreateAssetModalProps> = ({
 
         setStatus('saving');
         try {
-            await onSave(name, category);
+            if (mode === 'subject') {
+                if (!onSaveSubject) throw new Error('Subject assets are not available.');
+                await onSaveSubject({ name, description: subjectDescription.trim() || undefined });
+            } else {
+                await onSave(name, category);
+            }
             setStatus('success');
             setTimeout(() => {
                 onClose();
@@ -63,8 +74,19 @@ export const CreateAssetModal: React.FC<CreateAssetModalProps> = ({
                 {/* Header */}
                 <div className="px-6 pt-6 pb-2">
                     <div className="flex items-center gap-6 border-b border-neutral-700 pb-2">
-                        <button className="text-white font-medium border-b-2 border-white pb-2 -mb-2.5">创建素材</button>
-                        <button className="text-neutral-500 font-medium pb-2 hover:text-neutral-300 transition-colors">添加到已有素材</button>
+                        <button
+                            onClick={() => setMode('asset')}
+                            className={`font-medium pb-2 -mb-2.5 border-b-2 transition-colors ${mode === 'asset' ? 'text-white border-white' : 'text-neutral-500 border-transparent hover:text-neutral-300'}`}
+                        >
+                            创建素材
+                        </button>
+                        <button
+                            onClick={() => setMode('subject')}
+                            disabled={nodeToSnapshot.type !== '图片' || !onSaveSubject}
+                            className={`font-medium pb-2 -mb-2.5 border-b-2 transition-colors ${mode === 'subject' ? 'text-amber-200 border-amber-300' : 'text-neutral-500 border-transparent hover:text-neutral-300'} disabled:cursor-not-allowed disabled:opacity-40`}
+                        >
+                            创建主体
+                        </button>
                     </div>
                 </div>
 
@@ -99,35 +121,47 @@ export const CreateAssetModal: React.FC<CreateAssetModalProps> = ({
                             />
                         </div>
 
-                        {/* Category Dropdown */}
-                        <div className="flex flex-col gap-2 relative">
-                            <label className="text-sm font-medium text-neutral-200">分类 <span className="text-red-400">*</span></label>
-                            <button
-                                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                                className="w-full bg-[#1a1a1a] border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none flex items-center justify-between hover:bg-[#252525] transition-colors"
-                            >
-                                <span>{category}</span>
-                                <ChevronDown size={16} className="text-neutral-400" />
-                            </button>
+                        {mode === 'asset' ? (
+                            <div className="flex flex-col gap-2 relative">
+                                <label className="text-sm font-medium text-neutral-200">分类 <span className="text-red-400">*</span></label>
+                                <button
+                                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                                    className="w-full bg-[#1a1a1a] border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none flex items-center justify-between hover:bg-[#252525] transition-colors"
+                                >
+                                    <span>{category}</span>
+                                    <ChevronDown size={16} className="text-neutral-400" />
+                                </button>
 
-                            {isDropdownOpen && (
-                                <div className="absolute top-[70px] left-0 right-0 bg-[#1a1a1a] border border-neutral-700 rounded-lg shadow-xl z-10 py-1">
-                                    {CATEGORIES.map(cat => (
-                                        <button
-                                            key={cat}
-                                            onClick={() => {
-                                                setCategory(cat);
-                                                setIsDropdownOpen(false);
-                                            }}
-                                            className="w-full px-3 py-2 text-left hover:bg-[#252525] flex items-center justify-between group"
-                                        >
-                                            <span className="text-neutral-300 group-hover:text-white">{cat}</span>
-                                            {category === cat && <Check size={14} className="text-white" />}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
+                                {isDropdownOpen && (
+                                    <div className="absolute top-[70px] left-0 right-0 bg-[#1a1a1a] border border-neutral-700 rounded-lg shadow-xl z-10 py-1">
+                                        {CATEGORIES.map(cat => (
+                                            <button
+                                                key={cat}
+                                                onClick={() => {
+                                                    setCategory(cat);
+                                                    setIsDropdownOpen(false);
+                                                }}
+                                                className="w-full px-3 py-2 text-left hover:bg-[#252525] flex items-center justify-between group"
+                                            >
+                                                <span className="text-neutral-300 group-hover:text-white">{cat}</span>
+                                                {category === cat && <Check size={14} className="text-white" />}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="flex flex-col gap-2">
+                                <label className="text-sm font-medium text-neutral-200">主体描述</label>
+                                <textarea
+                                    value={subjectDescription}
+                                    onChange={(e) => setSubjectDescription(e.target.value)}
+                                    className="min-h-[112px] w-full resize-none bg-[#1a1a1a] border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-400 transition-colors"
+                                    placeholder="描述外观、服饰、材质或需要保持一致的特征"
+                                />
+                                <p className="text-xs leading-5 text-neutral-500">当前图片会复制为主体的受控参考，后续可跨工作流复用。</p>
+                            </div>
+                        )}
 
                     </div>
                 </div>
@@ -151,7 +185,7 @@ export const CreateAssetModal: React.FC<CreateAssetModalProps> = ({
                     >
                         {status === 'saving' && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
                         {status === 'success' && <Check size={16} />}
-                        {status === 'idle' && '创建'}
+                        {status === 'idle' && (mode === 'subject' ? '创建主体' : '创建')}
                         {status === 'saving' && '保存中...'}
                         {status === 'success' && '已保存！'}
                         {status === 'error' && '保存失败'}

@@ -9,6 +9,8 @@
 import React, { useState, useCallback } from 'react';
 import { NodeData, NodeType, NodeStatus, Viewport, ContextMenuState } from '../types';
 import { apiPost } from '../services/apiClient';
+import { uploadAsset } from '../services/assetService';
+import { createSubjectAsset } from '../services/subjectAssetService';
 import { createDefaultNodeData } from '../domain/nodes/nodeRegistry';
 
 interface UseAssetHandlersOptions {
@@ -188,6 +190,24 @@ export const useAssetHandlers = ({
         }
     }, [nodeToSnapshot]);
 
+    const handleSaveSubjectAsset = useCallback(async (input: { name: string; description?: string }) => {
+        if (!nodeToSnapshot?.resultUrl || nodeToSnapshot.type !== NodeType.IMAGE) return;
+
+        try {
+            const sourceUrl = nodeToSnapshot.resultUrl.startsWith('data:')
+                ? await uploadAsset(nodeToSnapshot.resultUrl, 'image', nodeToSnapshot.prompt)
+                : nodeToSnapshot.resultUrl;
+            await createSubjectAsset({
+                name: input.name,
+                description: input.description,
+                sourceUrl
+            });
+        } catch (error) {
+            console.error('Failed to create subject asset:', error);
+            throw error;
+        }
+    }, [nodeToSnapshot]);
+
     /**
      * Handle file upload from context menu
      */
@@ -294,6 +314,7 @@ export const useAssetHandlers = ({
         handleLibrarySelect,
         handleOpenCreateAsset,
         handleSaveAssetToLibrary,
+        handleSaveSubjectAsset,
         handleContextUpload
     };
 };

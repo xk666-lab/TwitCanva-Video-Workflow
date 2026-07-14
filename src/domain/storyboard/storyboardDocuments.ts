@@ -38,11 +38,15 @@ function numberValue(value: unknown, fallback: number): number {
 
 function normalizeReferenceAsset(value: unknown, index: number): StoryReferenceAsset {
   const asset = asRecord(value);
+  const { subjectAssetId, ...assetWithoutSubjectAssetId } = asset;
   return {
-    ...asset,
+    ...assetWithoutSubjectAssetId,
     id: stringValue(asset.id, `legacy-reference-${index + 1}`),
     name: stringValue(asset.name, `Reference ${index + 1}`),
     url: stringValue(asset.url),
+    ...(typeof subjectAssetId === 'string' && subjectAssetId.trim()
+      ? { subjectAssetId: subjectAssetId.trim() }
+      : {}),
     ...(typeof asset.description === 'string' ? { description: asset.description } : {}),
     ...(typeof asset.category === 'string' ? { category: asset.category } : {})
   };

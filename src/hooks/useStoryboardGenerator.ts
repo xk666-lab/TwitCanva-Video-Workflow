@@ -31,6 +31,7 @@ import type {
   CharacterAsset,
   LegacyStoryContext,
   SceneScript,
+  StoryReferenceAsset,
   StoryboardSessionSnapshot,
   StoryPackageGenerationMode
 } from '../domain/storyboard/storyboardTypes';
@@ -44,6 +45,9 @@ import {
   submitStoryPackageGeneration
 } from '../services/generationService';
 import { createStoryboardImageNode } from '../utils/storyboardNodeFactory';
+import { getConnectedSubjectInputs } from '../domain/graph/connectionSelectors';
+import { buildSubjectReferenceSnapshots } from '../domain/subjects/subjectAsset';
+import { resolveSubjectAssets } from '../services/subjectAssetService';
 
 export interface StoryboardState {
   step: 'characters' | 'story' | 'scripts' | 'preview' | 'generate';
@@ -144,6 +148,20 @@ function isStoryboardNode(node: NodeData | undefined): node is NodeData {
 
 function hasUpdates(updates: NodeUpdateMap): boolean {
   return Object.keys(updates).length > 0;
+}
+
+function mergeStoryReferenceAssets(...groups: StoryReferenceAsset[][]): StoryReferenceAsset[] {
+  const seen = new Set<string>();
+  const merged: StoryReferenceAsset[] = [];
+
+  for (const asset of groups.flat()) {
+    const key = asset.subjectAssetId ? `subject:${asset.subjectAssetId}` : `asset:${asset.id || asset.url}`;
+    if (seen.has(key) || !asset.url) continue;
+    seen.add(key);
+    merged.push(asset);
+  }
+
+  return merged;
 }
 
 function taskAndStatusTuple(
@@ -396,6 +414,30 @@ export const useStoryboardGenerator = ({
     let bound: ReturnType<typeof ensureBoundNodes> | undefined;
     try {
       bound = ensureBoundNodes();
+      const graphSubjectIds = [
+        ...getConnectedSubjectInputs(bound.scriptNode, bound.nodes, bound.edges),
+        ...getConnectedSubjectInputs(bound.storyboardNode, bound.nodes, bound.edges)
+      ]
+        .map(node => node.subjectAssetId)
+        .filter((id): id is string => Boolean(id));
+      const graphSubjectReferences = buildSubjectReferenceSnapshots(
+        graphSubjectIds.length > 0 ? await resolveSubjectAssets(graphSubjectIds) : []
+      ).flatMap(snapshot => snapshot.referenceImages.slice(0, 1).map(reference => ({
+        id: snapshot.subjectAssetId,
+        subjectAssetId: snapshot.subjectAssetId,
+        name: snapshot.name,
+        url: reference.url,
+        ...(snapshot.description ? { description: snapshot.description } : {}),
+        category: '主体资产'
+      })));
+      const referenceAssets = mergeStoryReferenceAssets(
+        graphSubjectReferences,
+        state.selectedCharacters
+      ).slice(0, 3);
+      const taskScriptData = {
+        ...bound.scriptNode.scriptData,
+        referenceAssets
+      };
       const task = await submitStoryPackageGeneration({
         nodeId: bound.scriptNode.id,
         scriptNodeId: bound.scriptNode.id,
@@ -405,9 +447,9 @@ export const useStoryboardGenerator = ({
         generationMode,
         sourceText: state.story,
         sceneCount: state.sceneCount,
-        referenceAssets: state.selectedCharacters,
+        referenceAssets,
         selectedImageModel: state.selectedImageModel,
-        scriptData: bound.scriptNode.scriptData,
+        scriptData: taskScriptData,
         storyboardData: bound.storyboardNode.storyboardData
       }, { workflowId });
       const updates = buildStoryTaskStartUpdates(bound.nodes, task);

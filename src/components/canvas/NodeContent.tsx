@@ -10,6 +10,7 @@ import { Loader2, Maximize2, ImageIcon as ImageIcon, Film, Upload, Pencil, Video
 import { NodeData, NodeStatus, NodeType } from '../../types';
 import { ScriptNodeContent } from './ScriptNodeContent';
 import { StoryboardNodeContent } from './StoryboardNodeContent';
+import { SubjectNodeContent } from './SubjectNodeContent';
 
 interface NodeContentProps {
     data: NodeData;
@@ -137,6 +138,10 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                 onRetry={onRetryStoryTask || (() => undefined)}
             />
         );
+    }
+
+    if (data.type === NodeType.SUBJECT) {
+        return <SubjectNodeContent data={data} onUpdate={onUpdate} />;
     }
 
     return (

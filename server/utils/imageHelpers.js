@@ -7,6 +7,53 @@
 import fs from 'fs';
 import path from 'path';
 
+function isInsideDirectory(rootDir, targetPath) {
+    const relative = path.relative(path.resolve(rootDir), path.resolve(targetPath));
+    return relative === ''
+        || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+function decodeLibraryPath(value) {
+    let decoded = value;
+    for (let index = 0; index < 4; index += 1) {
+        try {
+            const next = decodeURIComponent(decoded);
+            if (next === decoded) return decoded;
+            decoded = next;
+        } catch {
+            return null;
+        }
+    }
+    return decoded;
+}
+
+function resolveLibraryFilePath(libraryDir, fileUrlPath) {
+    const rawPath = String(fileUrlPath || '').split(/[?#]/, 1)[0];
+    const decodedPath = decodeLibraryPath(rawPath);
+    if (!decodedPath || !decodedPath.startsWith('/library/')) return null;
+
+    const relativePath = decodedPath.slice('/library/'.length);
+    if (!relativePath
+        || relativePath.split(/[\\/]+/).some(segment => segment === '.' || segment === '..')
+        || path.isAbsolute(relativePath)
+        || path.posix.isAbsolute(relativePath)
+        || path.win32.isAbsolute(relativePath)
+        || /^[a-zA-Z]:/.test(relativePath)) {
+        return null;
+    }
+
+    const absolutePath = path.resolve(libraryDir, relativePath);
+    if (!isInsideDirectory(libraryDir, absolutePath) || !fs.existsSync(absolutePath)) return null;
+
+    try {
+        const realLibraryDir = fs.realpathSync(libraryDir);
+        const realFilePath = fs.realpathSync(absolutePath);
+        return isInsideDirectory(realLibraryDir, realFilePath) ? realFilePath : null;
+    } catch {
+        return null;
+    }
+}
+
 // ============================================================================
 // BASE64 HELPERS
 // ============================================================================
@@ -17,7 +64,7 @@ import path from 'path';
  * @returns {string|null} Base64 data URL
  */
 export function resolveImageToBase64(input) {
-    if (!input) return null;
+    if (!input || typeof input !== 'string') return null;
 
     // Already a data URL
     if (input.startsWith('data:')) {
@@ -41,15 +88,10 @@ export function resolveImageToBase64(input) {
     // File URL (e.g., /library/images/...)
     if (filePath.startsWith('/library/')) {
         try {
-            // Strip query string (e.g., ?t=1234567890) used for cache-busting
-            const pathWithoutQuery = filePath.split('?')[0];
-
-            // Get the library directory from environment or default
             const libraryDir = process.env.LIBRARY_DIR || path.join(process.cwd(), 'library');
-            const relativePath = pathWithoutQuery.replace('/library/', '');
-            const absolutePath = path.join(libraryDir, relativePath);
+            const absolutePath = resolveLibraryFilePath(libraryDir, filePath);
 
-            if (fs.existsSync(absolutePath)) {
+            if (absolutePath) {
                 const fileBuffer = fs.readFileSync(absolutePath);
                 const ext = path.extname(absolutePath).toLowerCase();
                 const mimeType = {
@@ -63,16 +105,13 @@ export function resolveImageToBase64(input) {
                 }[ext] || 'image/png';
 
                 return `data:${mimeType};base64,${fileBuffer.toString('base64')}`;
-            } else {
-                console.warn('File not found for base64 conversion:', absolutePath);
             }
         } catch (error) {
             console.error('Error resolving file to base64:', error);
         }
     }
 
-    // If we couldn't resolve it, return null to prevent passing invalid data to API
-    console.warn('Could not resolve image to base64:', input.substring(0, 100));
+    // Do not pass an unresolved or out-of-library path to a provider.
     return null;
 }
 

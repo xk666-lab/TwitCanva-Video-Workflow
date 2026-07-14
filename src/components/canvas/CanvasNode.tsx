@@ -928,7 +928,7 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
 
         {/* Control Panel - Only show when single node is selected (not in group selection) */}
         {/* Hide controls for storyboard-generated scenes */}
-        {selected && showControls && data.type !== NodeType.TEXT && data.type !== NodeType.SCRIPT && data.type !== NodeType.STORYBOARD && !(data.prompt && data.prompt.startsWith('Extract panel #')) && (
+        {selected && showControls && data.type !== NodeType.TEXT && data.type !== NodeType.SUBJECT && data.type !== NodeType.SCRIPT && data.type !== NodeType.STORYBOARD && !(data.prompt && data.prompt.startsWith('Extract panel #')) && (
           <div className="absolute top-[calc(100%+12px)] left-1/2 -translate-x-1/2 w-[600px] flex justify-center z-[100]">
             <NodeControls
               data={data}

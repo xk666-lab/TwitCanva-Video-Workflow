@@ -6,6 +6,7 @@ import type { NodeData, NodeType } from '../types.ts';
 import { createDefaultNodeData } from '../domain/nodes/nodeRegistry.ts';
 import {
   getConnectedImageInputs,
+  getConnectedSubjectInputs,
   getConnectedTextInputs,
   getEndFrameInput,
   getStartFrameInput
@@ -84,4 +85,46 @@ test('selectors fall back to parentIds and frameInputs when edges are absent', (
   assert.deepEqual(getConnectedTextInputs(nodes[3], nodes, []).map(item => item.id), ['text']);
   assert.equal(getStartFrameInput(nodes[3], nodes, [])?.id, 'start');
   assert.equal(getEndFrameInput(nodes[3], nodes, [])?.id, 'end');
+});
+
+test('subject inputs are edge-first and never inferred from legacy parents', () => {
+  const nodes = [
+    node('subject', '主体', { subjectAssetId: 'asset-1' }),
+    node('text', '文本'),
+    node('target', '图片', { parentIds: ['subject'] })
+  ];
+  const subjectEdge = edge('subject-edge', 'subject', 'subject-output', 'target', 'subject-references', 'subject');
+  const textEdge = edge('text-edge', 'text', 'text-output', 'target', 'prompt-input', 'text');
+
+  assert.deepEqual(getConnectedSubjectInputs(nodes[2], nodes, [subjectEdge]).map(item => item.id), ['subject']);
+  assert.deepEqual(getConnectedSubjectInputs(nodes[2], nodes, [textEdge]), []);
+  assert.deepEqual(getConnectedSubjectInputs(nodes[2], nodes, []), []);
+});
+
+test('subject inputs ignore malformed image-output edges', () => {
+  const nodes = [node('image', '图片'), node('target', '图片')];
+  const malformedEdge = edge(
+    'malformed-subject-edge',
+    'image',
+    'image-output',
+    'target',
+    'subject-references',
+    'image'
+  );
+
+  assert.deepEqual(getConnectedSubjectInputs(nodes[1], nodes, [malformedEdge]), []);
+});
+
+test('subject inputs ignore malformed target ports on unsupported nodes', () => {
+  const nodes = [node('subject', '主体'), node('editor', '图片编辑器')];
+  const malformedEdge = edge(
+    'malformed-target-port',
+    'subject',
+    'subject-output',
+    'editor',
+    'subject-references',
+    'subject'
+  );
+
+  assert.deepEqual(getConnectedSubjectInputs(nodes[1], nodes, [malformedEdge]), []);
 });

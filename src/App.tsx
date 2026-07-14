@@ -382,6 +382,7 @@ export default function App() {
     nodeToSnapshot,
     handleOpenCreateAsset,
     handleSaveAssetToLibrary,
+    handleSaveSubjectAsset,
     handleContextUpload
   } = useAssetHandlers({ nodes, viewport, contextMenu, setNodes });
 
@@ -1054,6 +1055,7 @@ export default function App() {
         onClose={() => setIsCreateAssetModalOpen(false)}
         nodeToSnapshot={nodeToSnapshot}
         onSave={handleSaveAssetToLibrary}
+        onSaveSubject={handleSaveSubjectAsset}
       />
 
       {/* TikTok Import Modal */}

@@ -16,6 +16,7 @@ const TYPES = {
   IMAGE: '图片' as NodeType,
   VIDEO: '视频' as NodeType,
   AUDIO: '音频' as NodeType,
+  SUBJECT: '主体' as NodeType,
   IMAGE_EDITOR: '图片编辑器' as NodeType,
   VIDEO_EDITOR: '视频编辑器' as NodeType,
   SCRIPT: '脚本' as NodeType,
@@ -61,6 +62,18 @@ const definitions: NodeDefinition[] = [
     ]
   },
   {
+    type: TYPES.SUBJECT,
+    label: '主体',
+    icon: 'image',
+    category: 'input',
+    description: '管理用于生成一致性的主体参考',
+    defaultData: () => ({ ...genericDefaults(), model: 'subject-reference' }),
+    capabilities: {},
+    ports: [
+      { id: 'subject-output', label: '主体', direction: 'output', dataType: 'subject', multiple: true, role: 'subject' }
+    ]
+  },
+  {
     type: TYPES.IMAGE,
     label: '图片',
     icon: 'image',
@@ -76,6 +89,7 @@ const definitions: NodeDefinition[] = [
     ports: [
       { id: 'prompt-input', label: '提示词', direction: 'input', dataType: 'text', maxConnections: 1, role: 'prompt' },
       { id: 'reference-images', label: '参考图', direction: 'input', dataType: 'image', multiple: true, maxConnections: 14, ordered: true, role: 'reference' },
+      { id: 'subject-references', label: '主体参考', direction: 'input', dataType: 'subject', multiple: true, enabled: true, role: 'subject-reference' },
       { id: 'image-output', label: '图片', direction: 'output', dataType: 'image', multiple: true, role: 'image' }
     ]
   },
@@ -97,6 +111,7 @@ const definitions: NodeDefinition[] = [
       { id: 'start-frame', label: '首帧', direction: 'input', dataType: 'image', maxConnections: 1, role: 'start-frame' },
       { id: 'end-frame', label: '尾帧', direction: 'input', dataType: 'image', maxConnections: 1, role: 'end-frame' },
       { id: 'reference-images', label: '参考图', direction: 'input', dataType: 'image', multiple: true, maxConnections: 14, ordered: true, role: 'reference' },
+      { id: 'subject-references', label: '主体参考', direction: 'input', dataType: 'subject', multiple: true, enabled: true, role: 'subject-reference' },
       { id: 'motion-reference', label: '动作参考', direction: 'input', dataType: 'video', maxConnections: 1, role: 'motion-reference' },
       { id: 'video-output', label: '视频', direction: 'output', dataType: 'video', multiple: true, role: 'video' },
       { id: 'last-frame-output', label: '末帧', direction: 'output', dataType: 'image', multiple: true, role: 'last-frame' }
@@ -163,6 +178,7 @@ const definitions: NodeDefinition[] = [
     capabilities: { acceptsPrompt: true, supportsGeneration: true },
     ports: [
       { id: 'text-input', label: '故事文本', direction: 'input', dataType: 'text', maxConnections: 1, role: 'source-text' },
+      { id: 'subject-references', label: '主体参考', direction: 'input', dataType: 'subject', multiple: true, enabled: true, role: 'subject-reference' },
       { id: 'script-output', label: '脚本', direction: 'output', dataType: 'script', multiple: true, role: 'script' }
     ]
   },
@@ -180,6 +196,7 @@ const definitions: NodeDefinition[] = [
     capabilities: { supportsGeneration: true, supportsEditor: true },
     ports: [
       { id: 'script-input', label: '脚本', direction: 'input', dataType: 'script', required: true, maxConnections: 1, role: 'script' },
+      { id: 'subject-references', label: '主体参考', direction: 'input', dataType: 'subject', multiple: true, enabled: true, role: 'subject-reference' },
       { id: 'storyboard-output', label: '分镜', direction: 'output', dataType: 'storyboard', multiple: true, role: 'storyboard' }
     ]
   },
