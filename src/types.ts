@@ -1,3 +1,8 @@
+import type {
+  LegacyStoryContext,
+  ScriptDocument,
+  StoryboardDocument
+} from './domain/storyboard/storyboardTypes.ts';
 
 export enum NodeType {
   TEXT = '文本',
@@ -50,6 +55,8 @@ export interface NodeData {
   errorMessage?: string;
   activeTaskId?: string; // Persisted task currently allowed to update this node
   lastTaskId?: string; // Most recent terminal task, used for linked retry
+  scriptData?: ScriptDocument;
+  storyboardData?: StoryboardDocument;
 
   // Text node specific
   textMode?: 'menu' | 'editing'; // For Text nodes: current mode
@@ -151,14 +158,5 @@ export interface NodeGroup {
   id: string;
   nodeIds: string[];
   label: string;
-  storyContext?: {
-    story: string;
-    scripts: any[];
-    selectedCharacters?: any[]; // CharacterAsset[]
-    sceneCount?: number;
-    styleAnchor?: string;
-    characterDNA?: Record<string, string>;
-    compositeImageUrl?: string | null;
-    selectedImageModel?: string;
-  };
+  storyContext?: LegacyStoryContext;
 }
