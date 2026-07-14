@@ -79,6 +79,24 @@ test('successful task update appends its take and clears the active task', () =>
   assert.equal(update.lastTaskId, 'task-current');
 });
 
+test('story package output does not enter the generic media success path', () => {
+  const update = buildGenerationTaskNodeUpdate(createNode(), createTask({
+    operation: 'generate-story-package',
+    output: {
+      kind: 'story-package',
+      resultUrl: '/library/images/should-not-be-used.png',
+      scriptRevision: 0,
+      storyboardRevision: 0,
+      scriptData: {} as never,
+      storyboardData: {} as never
+    } as never
+  }));
+
+  assert.equal(update.status, 'loading');
+  assert.equal(update.resultUrl, undefined);
+  assert.equal(update.activeTaskId, 'task-current');
+});
+
 test('failed and cancelled tasks become retryable compatibility errors', () => {
   const failed = buildGenerationTaskNodeUpdate(createNode(), createTask({
     status: 'failed',

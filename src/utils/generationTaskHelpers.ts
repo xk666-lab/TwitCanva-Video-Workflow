@@ -1,6 +1,22 @@
-import type { GenerationTask } from '../domain/generation/generationTask.ts';
+import type {
+  GenerationTask,
+  MediaGenerationTaskOutput
+} from '../domain/generation/generationTask.ts';
 import type { NodeData } from '../types.ts';
 import { buildGenerationSuccessUpdate } from './takeHelpers.ts';
+
+function isMediaGenerationTaskOutput(
+  output: unknown
+): output is MediaGenerationTaskOutput {
+  if (output === null || typeof output !== 'object' || Array.isArray(output)) {
+    return false;
+  }
+
+  const candidate = output as { kind?: unknown; resultUrl?: unknown };
+  return candidate.kind !== 'story-package'
+    && typeof candidate.resultUrl === 'string'
+    && candidate.resultUrl.length > 0;
+}
 
 export function canApplyGenerationTaskResult(node: NodeData, task: GenerationTask): boolean {
   return node.id === task.nodeId && node.activeTaskId === task.taskId;
@@ -12,11 +28,7 @@ export function buildGenerationTaskNodeUpdate(
 ): Partial<NodeData> {
   if (!canApplyGenerationTaskResult(node, task)) return {};
 
-  if (
-    task.status === 'succeeded'
-    && task.output?.kind !== 'story-package'
-    && task.output?.resultUrl
-  ) {
+  if (task.status === 'succeeded' && isMediaGenerationTaskOutput(task.output)) {
     return {
       ...buildGenerationSuccessUpdate(node, task.output),
       activeTaskId: undefined,

@@ -4,6 +4,7 @@ import test from 'node:test';
 import type { GenerationTask } from '../domain/generation/generationTask.ts';
 import { buildGenerationTaskNodeUpdates } from '../domain/generation/taskResultUpdates.ts';
 import { createDefaultNodeData } from '../domain/nodes/nodeRegistry.ts';
+import { applyNodeUpdateMap } from '../domain/nodes/nodeUpdates.ts';
 import type { NodeData } from '../types.ts';
 
 function nodes(): NodeData[] {
@@ -113,6 +114,16 @@ test('a stale task returns no partial updates', () => {
   assert.deepEqual(buildGenerationTaskNodeUpdates(nodes(), task({ taskId: 'task-old' })), {});
 });
 
+test('a script revision mismatch returns no partial story package update', () => {
+  const changed = nodes();
+  changed[0] = {
+    ...changed[0],
+    scriptData: { ...changed[0].scriptData!, revision: 3 }
+  };
+
+  assert.deepEqual(buildGenerationTaskNodeUpdates(changed, task()), {});
+});
+
 test('story package failure marks both bound nodes retryable without deleting documents', () => {
   const updates = buildGenerationTaskNodeUpdates(nodes(), task({
     status: 'failed',
@@ -125,4 +136,28 @@ test('story package failure marks both bound nodes retryable without deleting do
   assert.equal(updates['storyboard-1'].status, 'error');
   assert.equal(updates['script-1'].lastTaskId, 'task-1');
   assert.ok(nodes()[0].scriptData);
+});
+
+test('story package cancellation marks both matching nodes terminal without replacing documents', () => {
+  const currentNodes = nodes();
+  const scriptDocument = currentNodes[0].scriptData;
+  const storyboardDocument = currentNodes[1].storyboardData;
+  const updates = buildGenerationTaskNodeUpdates(currentNodes, task({
+    status: 'cancelled',
+    progress: 0,
+    output: undefined,
+    error: { code: 'CANCELLED', message: 'Cancellation requested', retryable: true }
+  }));
+
+  assert.deepEqual(Object.keys(updates).sort(), ['script-1', 'storyboard-1']);
+  assert.equal(updates['script-1'].status, 'error');
+  assert.equal(updates['storyboard-1'].status, 'error');
+  assert.equal(updates['script-1'].errorMessage, 'Cancellation requested');
+  assert.equal(updates['storyboard-1'].errorMessage, 'Cancellation requested');
+  assert.equal(updates['script-1'].activeTaskId, undefined);
+  assert.equal(updates['storyboard-1'].activeTaskId, undefined);
+
+  const updatedNodes = applyNodeUpdateMap(currentNodes, updates);
+  assert.equal(updatedNodes[0].scriptData, scriptDocument);
+  assert.equal(updatedNodes[1].storyboardData, storyboardDocument);
 });
