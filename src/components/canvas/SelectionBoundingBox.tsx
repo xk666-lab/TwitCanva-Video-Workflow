@@ -19,6 +19,7 @@ interface SelectionBoundingBoxProps {
     onSortNodes?: (direction: 'horizontal' | 'vertical' | 'grid') => void;
     onCreateVideo?: () => void;
     onEditStoryboard?: (groupId: string) => void;
+    onSaveTemplate?: (nodeIds: string[], group?: NodeGroup) => void;
 }
 
 // ============================================================================
@@ -147,7 +148,8 @@ export const SelectionBoundingBox: React.FC<SelectionBoundingBoxProps> = ({
     onRenameGroup,
     onSortNodes,
     onCreateVideo,
-    onEditStoryboard
+    onEditStoryboard,
+    onSaveTemplate
 }) => {
     // ============================================================================
     // STATE
@@ -309,6 +311,22 @@ export const SelectionBoundingBox: React.FC<SelectionBoundingBoxProps> = ({
                         </svg>
                         Group
                     </button>
+                    {onSaveTemplate && (
+                        <button
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onSaveTemplate(selectedNodes.map(node => node.id));
+                            }}
+                            className="bg-blue-600 border border-blue-400/50 hover:bg-blue-500 text-white text-sm px-4 py-2.5 rounded flex items-center gap-2 transition-colors"
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M4 4h13l3 3v13H4z" />
+                                <path d="M8 4v6h8V4" />
+                                <path d="M8 20v-6h8v6" />
+                            </svg>
+                            保存为模板
+                        </button>
+                    )}
                 </div>
             )}
 
@@ -401,6 +419,23 @@ export const SelectionBoundingBox: React.FC<SelectionBoundingBoxProps> = ({
                         </svg>
                         Ungroup
                     </button>
+
+                    {onSaveTemplate && (
+                        <button
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onSaveTemplate(selectedNodes.map(node => node.id), group);
+                            }}
+                            className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2.5 rounded flex items-center gap-2 transition-colors"
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M4 4h13l3 3v13H4z" />
+                                <path d="M8 4v6h8V4" />
+                                <path d="M8 20v-6h8v6" />
+                            </svg>
+                            保存为模板
+                        </button>
+                    )}
 
                     {/* Edit Storyboard Button (only for storyboards) */}
                     {group.storyContext && (

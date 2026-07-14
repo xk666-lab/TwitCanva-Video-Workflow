@@ -24,6 +24,7 @@ import { useGroupManagement } from './hooks/useGroupManagement';
 import { useHistory } from './hooks/useHistory';
 import { useCanvasTitle } from './hooks/useCanvasTitle';
 import { useWorkflow } from './hooks/useWorkflow';
+import { useWorkflowTemplates } from './hooks/useWorkflowTemplates';
 import { useImageEditor } from './hooks/useImageEditor';
 import { useVideoEditor } from './hooks/useVideoEditor';
 import { usePanelState } from './hooks/usePanelState';
@@ -48,6 +49,7 @@ import { CreateAssetModal } from './components/modals/CreateAssetModal';
 import { TikTokImportModal } from './components/modals/TikTokImportModal';
 import { TwitterPostModal } from './components/modals/TwitterPostModal';
 import { TikTokPostModal } from './components/modals/TikTokPostModal';
+import { WorkflowTemplateSaveModal } from './components/modals/WorkflowTemplateSaveModal';
 import { AssetLibraryPanel } from './components/AssetLibraryPanel';
 import { useTikTokImport } from './hooks/useTikTokImport';
 import { useStoryboardGenerator } from './hooks/useStoryboardGenerator';
@@ -293,6 +295,68 @@ export default function App() {
     workflowId,
     updateNode
   });
+
+  const {
+    isSavingTemplate,
+    isInsertingTemplate,
+    templateError,
+    saveWorkflowTemplate,
+    insertWorkflowTemplate,
+    clearTemplateError
+  } = useWorkflowTemplates({
+    nodes,
+    edges,
+    groups,
+    viewport,
+    replaceGraph,
+    setGroups,
+    setSelectedNodeIds
+  });
+  const [templateRevision, setTemplateRevision] = useState(0);
+  const [templateSaveDialog, setTemplateSaveDialog] = useState<{
+    isOpen: boolean;
+    nodeIds: string[];
+    initialTitle: string;
+  }>({ isOpen: false, nodeIds: [], initialTitle: '未命名模板' });
+
+  const handleOpenTemplateSaveModal = React.useCallback((nodeIds: string[], group?: NodeGroup) => {
+    const firstNode = nodes.find(node => node.id === nodeIds[0]);
+    clearTemplateError();
+    setTemplateSaveDialog({
+      isOpen: true,
+      nodeIds,
+      initialTitle: group?.label || firstNode?.title || '未命名模板'
+    });
+  }, [nodes, clearTemplateError]);
+
+  const handleCloseTemplateSaveModal = React.useCallback(() => {
+    if (isSavingTemplate) return;
+    clearTemplateError();
+    setTemplateSaveDialog(previous => ({ ...previous, isOpen: false }));
+  }, [isSavingTemplate, clearTemplateError]);
+
+  const handleSaveTemplate = React.useCallback(async (title: string, description: string) => {
+    try {
+      await saveWorkflowTemplate({
+        title,
+        description,
+        selectedNodeIds: templateSaveDialog.nodeIds
+      });
+      setTemplateRevision(previous => previous + 1);
+      setTemplateSaveDialog(previous => ({ ...previous, isOpen: false }));
+    } catch (error) {
+      console.error('Failed to save workflow template:', error);
+    }
+  }, [saveWorkflowTemplate, templateSaveDialog.nodeIds]);
+
+  const handleInsertTemplate = React.useCallback(async (templateId: string) => {
+    try {
+      await insertWorkflowTemplate(templateId);
+      closeWorkflowPanel();
+    } catch (error) {
+      console.error('Failed to insert workflow template:', error);
+    }
+  }, [insertWorkflowTemplate, closeWorkflowPanel]);
 
   const { handleImageEditGeneration } = useImageEditGeneration({
     nodes,
@@ -1020,6 +1084,9 @@ export default function App() {
         currentWorkflowId={workflowId || undefined}
         panelY={workflowPanelY}
         canvasTheme={canvasTheme}
+        onInsertTemplate={handleInsertTemplate}
+        templateRevision={templateRevision}
+        isInsertingTemplate={isInsertingTemplate}
       />
 
       {/* History Panel */}
@@ -1122,6 +1189,19 @@ export default function App() {
       {connectionError && (
         <div className="fixed left-1/2 top-20 z-[120] -translate-x-1/2 rounded-xl border border-red-500/30 bg-red-950/95 px-4 py-2 text-sm text-red-100 shadow-2xl">
           {connectionError}
+        </div>
+      )}
+
+      {templateError && !templateSaveDialog.isOpen && (
+        <div className="fixed left-1/2 top-32 z-[120] flex max-w-lg -translate-x-1/2 items-center gap-3 rounded-xl border border-red-500/30 bg-red-950/95 px-4 py-2 text-sm text-red-100 shadow-2xl">
+          <span>{templateError}</span>
+          <button
+            onClick={clearTemplateError}
+            className="text-red-200/70 transition-colors hover:text-white"
+            aria-label="关闭模板错误提示"
+          >
+            ×
+          </button>
         </div>
       )}
 
@@ -1284,6 +1364,7 @@ export default function App() {
                 if (group) sortGroupNodes(group.id, direction, nodes, setNodes);
               }}
               onEditStoryboard={handleEditStoryboard}
+              onSaveTemplate={handleOpenTemplateSaveModal}
             />
           )}
 
@@ -1324,6 +1405,7 @@ export default function App() {
                   handleCreateStoryboardVideo(groupNodeIds);
                 }}
                 onEditStoryboard={handleEditStoryboard}
+                onSaveTemplate={handleOpenTemplateSaveModal}
               />
             );
           })}
@@ -1357,6 +1439,11 @@ export default function App() {
         onPaste={handlePaste}
         onCopy={handleCopy}
         onDuplicate={handleDuplicate}
+        onSaveTemplate={() => {
+          if (contextMenu.sourceNodeId) {
+            handleOpenTemplateSaveModal([contextMenu.sourceNodeId]);
+          }
+        }}
         onCreateAsset={handleContextMenuCreateAsset}
         onAddAssets={handleContextMenuAddAssets}
         canUndo={canUndo}
@@ -1402,6 +1489,15 @@ export default function App() {
           handleCloseImageEditor();
         }}
         onUpdate={updateNode}
+      />
+
+      <WorkflowTemplateSaveModal
+        isOpen={templateSaveDialog.isOpen}
+        initialTitle={templateSaveDialog.initialTitle}
+        isSaving={isSavingTemplate}
+        error={templateError}
+        onClose={handleCloseTemplateSaveModal}
+        onSave={handleSaveTemplate}
       />
 
       {/* Storyboard Video Generation Modal */}

@@ -34,6 +34,7 @@ interface ContextMenuProps {
   onPaste?: () => void;
   onCopy?: () => void;
   onDuplicate?: () => void;
+  onSaveTemplate?: () => void;
   onCreateAsset?: () => void;
   onAddAssets?: () => void;
   canUndo?: boolean;
@@ -51,6 +52,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onPaste,
   onCopy,
   onDuplicate,
+  onSaveTemplate,
   onCreateAsset,
   onAddAssets,
   canUndo = false,
@@ -176,6 +178,17 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
               }
             }}
           />
+          {onSaveTemplate && (
+            <MenuItem
+              icon={<Layers size={16} />}
+              label="保存为模板"
+              onClick={() => {
+                onSaveTemplate();
+                onClose();
+              }}
+              canvasTheme={canvasTheme}
+            />
+          )}
 
           <div className="my-1 border-t border-neutral-800 mx-1" />
 

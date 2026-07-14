@@ -27,6 +27,17 @@ interface AssetMetadata {
     createdAt: string;
 }
 
+interface WorkflowTemplateSummary {
+    id: string;
+    title: string;
+    description?: string;
+    createdAt: string;
+    updatedAt: string;
+    nodeCount: number;
+    inputCount: number;
+    outputCount: number;
+}
+
 interface WorkflowPanelProps {
     isOpen: boolean;
     onClose: () => void;
@@ -34,6 +45,9 @@ interface WorkflowPanelProps {
     currentWorkflowId?: string;
     panelY?: number;
     canvasTheme?: 'dark' | 'light';
+    onInsertTemplate?: (templateId: string) => void | Promise<void>;
+    templateRevision?: number;
+    isInsertingTemplate?: boolean;
 }
 
 export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
@@ -42,13 +56,20 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
     onLoadWorkflow,
     currentWorkflowId,
     panelY = 200,
-    canvasTheme = 'dark'
+    canvasTheme = 'dark',
+    onInsertTemplate,
+    templateRevision = 0,
+    isInsertingTemplate = false
 }) => {
     const [workflows, setWorkflows] = useState<WorkflowSummary[]>([]);
     const [publicWorkflows, setPublicWorkflows] = useState<WorkflowSummary[]>([]);
-    const [activeTab, setActiveTab] = useState<'my' | 'public'>('my');
+    const [workflowTemplates, setWorkflowTemplates] = useState<WorkflowTemplateSummary[]>([]);
+    const [activeTab, setActiveTab] = useState<'my' | 'public' | 'templates'>('my');
     const [loading, setLoading] = useState(false);
+    const [loadingTemplates, setLoadingTemplates] = useState(false);
+    const [templateLoadError, setTemplateLoadError] = useState<string | null>(null);
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+    const [templateDeleteConfirm, setTemplateDeleteConfirm] = useState<string | null>(null);
     const [editingCoverFor, setEditingCoverFor] = useState<string | null>(null);
     const [coverAssets, setCoverAssets] = useState<AssetMetadata[]>([]);
     const [loadingAssets, setLoadingAssets] = useState(false);
@@ -77,12 +98,26 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
         }
     };
 
+    const fetchWorkflowTemplates = async () => {
+        setLoadingTemplates(true);
+        setTemplateLoadError(null);
+        try {
+            setWorkflowTemplates(await apiGet<WorkflowTemplateSummary[]>('/api/workflow-templates'));
+        } catch (error) {
+            console.error('Failed to fetch workflow templates:', error);
+            setTemplateLoadError(error instanceof Error ? error.message : 'Unable to load workflow templates.');
+        } finally {
+            setLoadingTemplates(false);
+        }
+    };
+
     useEffect(() => {
         if (isOpen) {
             fetchWorkflows();
             fetchPublicWorkflows();
+            fetchWorkflowTemplates();
         }
-    }, [isOpen]);
+    }, [isOpen, templateRevision]);
 
     const handleDelete = async (id: string) => {
         try {
@@ -92,6 +127,18 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
             console.error('Failed to delete workflow:', error);
         } finally {
             setDeleteConfirm(null);
+        }
+    };
+
+    const handleDeleteTemplate = async (id: string) => {
+        try {
+            await apiDelete(`/api/workflow-templates/${id}`);
+            setWorkflowTemplates(prev => prev.filter(template => template.id !== id));
+        } catch (error) {
+            console.error('Failed to delete workflow template:', error);
+            setTemplateLoadError(error instanceof Error ? error.message : 'Unable to delete workflow template.');
+        } finally {
+            setTemplateDeleteConfirm(null);
         }
     };
 
@@ -229,6 +276,53 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
         </div>
     );
 
+    const renderTemplateCard = (template: WorkflowTemplateSummary) => (
+        <div
+            key={template.id}
+            onClick={() => {
+                if (!isInsertingTemplate) void onInsertTemplate?.(template.id);
+            }}
+            className={`rounded-xl overflow-hidden cursor-pointer transition-all group ${isInsertingTemplate ? 'opacity-60 cursor-wait' : 'hover:-translate-y-0.5'}`}
+        >
+            <div className="aspect-[4/3] flex items-center justify-center relative overflow-hidden bg-gradient-to-br from-sky-800/30 to-cyan-900/30">
+                <div className="w-16 h-16 rounded-lg flex items-center justify-center bg-gradient-to-br from-sky-500/20 to-cyan-600/20">
+                    {isInsertingTemplate ? (
+                        <Loader2 size={28} className="animate-spin text-sky-300" />
+                    ) : (
+                        <FileText size={28} className="text-sky-300" />
+                    )}
+                </div>
+                <div className="absolute top-2 left-2 px-2 py-0.5 bg-sky-600/80 rounded text-[10px] font-medium text-white">
+                    Template
+                </div>
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-all">
+                    <button
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            setTemplateDeleteConfirm(template.id);
+                        }}
+                        className="p-1.5 bg-black/50 hover:bg-red-500 rounded-lg transition-all"
+                        title="Delete template"
+                        disabled={isInsertingTemplate}
+                    >
+                        <Trash2 size={14} className="text-white" />
+                    </button>
+                </div>
+            </div>
+            <div className={`p-3 ${isDark ? 'bg-neutral-900/50' : 'bg-neutral-100/90'}`}>
+                <h3 className={`font-medium text-sm truncate ${isDark ? 'text-white' : 'text-neutral-900'}`}>
+                    {template.title || 'Untitled template'}
+                </h3>
+                <p className={`text-xs mt-0.5 line-clamp-2 min-h-8 ${isDark ? 'text-neutral-500' : 'text-neutral-600'}`}>
+                    {template.description || 'Reusable workflow structure'}
+                </p>
+                <p className={`text-[11px] mt-2 ${isDark ? 'text-neutral-600' : 'text-neutral-500'}`}>
+                    {template.nodeCount} nodes | {template.inputCount} inputs | {template.outputCount} outputs
+                </p>
+            </div>
+        </div>
+    );
+
     if (!isOpen) return null;
 
     return (
@@ -256,6 +350,15 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                                 }`}
                         >
                             Public Workflows
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('templates')}
+                            className={`font-medium pb-1 transition-colors ${activeTab === 'templates'
+                                ? isDark ? 'text-white border-b-2 border-white' : 'text-neutral-900 border-b-2 border-neutral-900'
+                                : isDark ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-400 hover:text-neutral-600'
+                                }`}
+                        >
+                            Templates
                         </button>
                     </div>
                     <button
@@ -287,7 +390,7 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                                 {workflows.map(workflow => renderWorkflowCard(workflow))}
                             </div>
                         )
-                    ) : (
+                    ) : activeTab === 'public' ? (
                         publicWorkflows.length === 0 ? (
                             <div className="flex flex-col items-center justify-center h-40 text-neutral-500 gap-2">
                                 <FileText size={32} className="opacity-50" />
@@ -299,6 +402,32 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                                 {publicWorkflows.map(workflow => renderWorkflowCard(workflow, true))}
                             </div>
                         )
+                    ) : loadingTemplates ? (
+                        <div className="flex items-center justify-center h-40">
+                            <Loader2 className="animate-spin text-neutral-500" size={24} />
+                        </div>
+                    ) : templateLoadError ? (
+                        <div className="flex flex-col items-center justify-center h-40 text-neutral-500 gap-3 text-center">
+                            <FileText size={32} className="opacity-50" />
+                            <p>Unable to load templates</p>
+                            <p className="max-w-md text-xs text-neutral-600">{templateLoadError}</p>
+                            <button
+                                onClick={fetchWorkflowTemplates}
+                                className="rounded-lg bg-neutral-800 px-3 py-1.5 text-xs text-white transition-colors hover:bg-neutral-700"
+                            >
+                                Retry
+                            </button>
+                        </div>
+                    ) : workflowTemplates.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-40 text-neutral-500 gap-2">
+                            <FileText size={32} className="opacity-50" />
+                            <p>No saved templates yet</p>
+                            <p className="text-xs text-neutral-600">Select nodes on the canvas and save their internal workflow as a reusable template.</p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-3 gap-4">
+                            {workflowTemplates.map(renderTemplateCard)}
+                        </div>
                     )}
                 </div>
             </div>
@@ -381,6 +510,31 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                                 )}
                             </div>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {templateDeleteConfirm && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+                    <div className="bg-[#1a1a1a] border border-neutral-700 rounded-2xl p-6 w-[340px] shadow-2xl">
+                        <h3 className="text-lg font-semibold text-white mb-2">Delete template?</h3>
+                        <p className="text-neutral-400 text-sm mb-6">
+                            This removes the reusable template only. Existing workflows and inserted nodes are not changed.
+                        </p>
+                        <div className="flex gap-3 justify-end">
+                            <button
+                                onClick={() => setTemplateDeleteConfirm(null)}
+                                className="px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white text-sm transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => handleDeleteTemplate(templateDeleteConfirm)}
+                                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm transition-colors"
+                            >
+                                Delete
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

@@ -17,6 +17,7 @@ import tiktokPostRoutes from './routes/tiktok-post.js';
 import localModelsRoutes from './routes/local-models.js';
 import storyboardRoutes from './routes/storyboard.js';
 import workflowRoutes from './routes/workflows.js';
+import workflowTemplateRoutes from './routes/workflow-templates.js';
 import libraryRoutes from './routes/library.js';
 import assetRoutes from './routes/assets.js';
 import subjectAssetRoutes from './routes/subject-assets.js';
@@ -39,6 +40,7 @@ const ALLOWED_BROWSER_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS || process.env
 // Ensure library directories exist
 const LIBRARY_DIR = path.join(__dirname, '..', 'library');
 const WORKFLOWS_DIR = path.join(LIBRARY_DIR, 'workflows');
+const WORKFLOW_TEMPLATES_DIR = path.join(LIBRARY_DIR, 'templates');
 const IMAGES_DIR = path.join(LIBRARY_DIR, 'images');
 const VIDEOS_DIR = path.join(LIBRARY_DIR, 'videos');
 const CHATS_DIR = path.join(LIBRARY_DIR, 'chats');
@@ -46,7 +48,7 @@ const LIBRARY_ASSETS_DIR = path.join(LIBRARY_DIR, 'assets');
 const SERVER_DATA_DIR = path.join(__dirname, '..', '.twitcanva');
 const TASKS_DIR = path.join(SERVER_DATA_DIR, 'tasks');
 
-[LIBRARY_DIR, WORKFLOWS_DIR, IMAGES_DIR, VIDEOS_DIR, CHATS_DIR, LIBRARY_ASSETS_DIR, TASKS_DIR].forEach(dir => {
+[LIBRARY_DIR, WORKFLOWS_DIR, WORKFLOW_TEMPLATES_DIR, IMAGES_DIR, VIDEOS_DIR, CHATS_DIR, LIBRARY_ASSETS_DIR, TASKS_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
@@ -151,6 +153,7 @@ app.locals.IMAGES_DIR = IMAGES_DIR;
 app.locals.VIDEOS_DIR = VIDEOS_DIR;
 app.locals.LIBRARY_DIR = LIBRARY_DIR;
 app.locals.WORKFLOWS_DIR = WORKFLOWS_DIR;
+app.locals.WORKFLOW_TEMPLATES_DIR = WORKFLOW_TEMPLATES_DIR;
 app.locals.CHATS_DIR = CHATS_DIR;
 app.locals.LIBRARY_ASSETS_DIR = LIBRARY_ASSETS_DIR;
 app.locals.TASKS_DIR = TASKS_DIR;
@@ -290,6 +293,7 @@ app.use('/api/storyboard', storyboardRoutes);
 
 // Mount extracted foundation routes before the legacy inline handlers below.
 app.use('/api', workflowRoutes);
+app.use('/api', workflowTemplateRoutes);
 app.use('/api', libraryRoutes);
 app.use('/api', assetRoutes);
 app.use('/api', subjectAssetRoutes);
