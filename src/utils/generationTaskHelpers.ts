@@ -13,7 +13,7 @@ function isMediaGenerationTaskOutput(
   }
 
   const candidate = output as { kind?: unknown; resultUrl?: unknown };
-  return candidate.kind !== 'story-package'
+  return (candidate.kind === undefined || candidate.kind === 'media')
     && typeof candidate.resultUrl === 'string'
     && candidate.resultUrl.length > 0;
 }

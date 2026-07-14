@@ -97,6 +97,19 @@ test('story package output does not enter the generic media success path', () =>
   assert.equal(update.activeTaskId, 'task-current');
 });
 
+test('unknown output kind does not enter the generic media success path', () => {
+  const update = buildGenerationTaskNodeUpdate(createNode(), createTask({
+    output: {
+      kind: 'unknown',
+      resultUrl: '/library/images/should-not-be-used.png'
+    } as never
+  }));
+
+  assert.equal(update.status, 'loading');
+  assert.equal(update.resultUrl, undefined);
+  assert.equal(update.activeTaskId, 'task-current');
+});
+
 test('failed and cancelled tasks become retryable compatibility errors', () => {
   const failed = buildGenerationTaskNodeUpdate(createNode(), createTask({
     status: 'failed',
