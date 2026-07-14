@@ -64,6 +64,10 @@ test('script normalization does not mutate its input', () => {
   const raw = {
     sourceText: 'A courier finds a lost robot',
     synopsis: 'A short adventure',
+    generatedBy: {
+      taskId: 'task-1',
+      futureProvenance: 'kept'
+    },
     futureField: 'kept'
   };
   const snapshot = structuredClone(raw);
@@ -71,5 +75,7 @@ test('script normalization does not mutate its input', () => {
 
   assert.deepEqual(raw, snapshot);
   assert.equal(normalized.sourceText, raw.sourceText);
+  assert.deepEqual(normalized.generatedBy, raw.generatedBy);
+  assert.notEqual(normalized.generatedBy, raw.generatedBy);
   assert.equal((normalized as Record<string, unknown>).futureField, 'kept');
 });

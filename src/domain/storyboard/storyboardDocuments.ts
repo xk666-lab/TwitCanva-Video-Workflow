@@ -2,7 +2,6 @@ import {
   SCRIPT_DOCUMENT_SCHEMA_VERSION,
   STORYBOARD_DOCUMENT_SCHEMA_VERSION,
   type ScriptDocument,
-  type StoryGenerationProvenance,
   type StoryReferenceAsset,
   type StoryboardDocument,
   type StoryboardShot,
@@ -33,16 +32,6 @@ function stringValue(value: unknown, fallback = ''): string {
 
 function numberValue(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-}
-
-function normalizeGenerationProvenance(value: unknown): StoryGenerationProvenance {
-  const provenance = asRecord(value);
-  return {
-    ...provenance,
-    taskId: stringValue(provenance.taskId),
-    provider: stringValue(provenance.provider),
-    model: stringValue(provenance.model)
-  };
 }
 
 function normalizeReferenceAsset(value: unknown, index: number): StoryReferenceAsset {
@@ -115,7 +104,7 @@ export function normalizeScriptDocument(
       ? raw.referenceAssets.map(normalizeReferenceAsset)
       : [],
     revision: Math.max(0, Math.trunc(numberValue(raw.revision, 0))),
-    ...(raw.generatedBy ? { generatedBy: normalizeGenerationProvenance(raw.generatedBy) } : {}),
+    ...(raw.generatedBy ? { generatedBy: { ...asRecord(raw.generatedBy) } as unknown as ScriptDocument['generatedBy'] } : {}),
     createdAt: stringValue(raw.createdAt, defaults.createdAt),
     updatedAt: stringValue(raw.updatedAt, defaults.updatedAt)
   };
@@ -171,7 +160,7 @@ export function normalizeStoryboardDocument(
       ? { compositeImageUrl: raw.compositeImageUrl as string | null }
       : {}),
     revision: Math.max(0, Math.trunc(numberValue(raw.revision, 0))),
-    ...(raw.generatedBy ? { generatedBy: normalizeGenerationProvenance(raw.generatedBy) } : {}),
+    ...(raw.generatedBy ? { generatedBy: { ...asRecord(raw.generatedBy) } as unknown as StoryboardDocument['generatedBy'] } : {}),
     createdAt: stringValue(raw.createdAt, defaults.createdAt),
     updatedAt: stringValue(raw.updatedAt, defaults.updatedAt)
   };
