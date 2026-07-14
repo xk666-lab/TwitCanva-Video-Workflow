@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    generateStoryboardScriptsWithConfiguredProvider,
     generateStoryPackageWithConfiguredProvider,
     resolveStoryboardTextProvider
 } from './storyboardGeneration.js';
@@ -59,4 +60,54 @@ test('missing text credentials fail before provider execution', async () => {
         }),
         /No text generation API key configured/
     );
+});
+
+test('scripts mode keeps the OpenAI-compatible response shape', async () => {
+    const result = await generateStoryboardScriptsWithConfiguredProvider({
+        locals: { OPENAI_API_KEY: 'key', OPENAI_TEXT_MODEL: 'gpt-4.1-mini' },
+        payload: { story: 'A fox enters a library', sceneCount: 1 },
+        dependencies: {
+            requestOpenAI: async () => JSON.stringify({
+                story: 'A fox enters a library',
+                styleAnchor: 'storybook',
+                characterDNA: {},
+                scenes: [{
+                    sceneNumber: 1,
+                    description: 'The fox opens a book',
+                    cameraAngle: 'Medium shot',
+                    cameraMovement: 'Static',
+                    lighting: 'Warm',
+                    mood: 'Curious'
+                }]
+            })
+        }
+    });
+
+    assert.equal(result.provider, 'openai');
+    assert.equal(result.scripts.length, 1);
+    assert.equal(result.styleAnchor, 'storybook');
+});
+
+test('scripts mode accepts the existing Gemini JSON shape', async () => {
+    const result = await generateStoryboardScriptsWithConfiguredProvider({
+        locals: { GEMINI_API_KEY: 'key' },
+        payload: { story: 'A train crosses the clouds', sceneCount: 1, referenceImages: [] },
+        dependencies: {
+            requestGeminiScripts: async () => JSON.stringify({
+                styleAnchor: 'cinematic',
+                characterDNA: {},
+                scenes: [{
+                    sceneNumber: 1,
+                    description: 'A train leaves a cloud tunnel',
+                    cameraAngle: 'Wide shot',
+                    cameraMovement: 'Tracking',
+                    lighting: 'Sunrise',
+                    mood: 'Hopeful'
+                }]
+            })
+        }
+    });
+
+    assert.equal(result.provider, 'gemini');
+    assert.equal(result.scripts[0].cameraMovement, 'Tracking');
 });
