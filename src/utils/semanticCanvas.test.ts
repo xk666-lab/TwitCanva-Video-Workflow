@@ -270,7 +270,7 @@ test('creates an explicit edge with stable ports and ordered multi-input metadat
   assert.equal(second.edge?.order, 1);
 });
 
-test('uses one deterministic port placement for rails and connection anchors', async () => {
+test('uses merged midpoint rail placement for visible semantic ports', async () => {
   const semanticCanvas = await loadSemanticCanvas();
   assert.equal(typeof semanticCanvas.getNodePortCanvasAnchor, 'function');
 
@@ -279,13 +279,13 @@ test('uses one deterministic port placement for rails and connection anchors', a
   const endFrame = semanticCanvas.getNodePortCanvasAnchor!('视频', 'end-frame', bounds);
   const videoOutput = semanticCanvas.getNodePortCanvasAnchor!('视频', 'video-output', bounds);
 
-  assert.deepEqual(startFrame, { side: 'left', relativeY: 0.25, x: 100, y: 280 });
-  assert.deepEqual(endFrame, { side: 'left', relativeY: 0.375, x: 100, y: 320 });
+  assert.deepEqual(startFrame, { side: 'left', relativeY: 0.5, x: 100, y: 360 });
+  assert.deepEqual(endFrame, { side: 'left', relativeY: 0.5, x: 100, y: 360 });
   assert.deepEqual(videoOutput, {
     side: 'right',
-    relativeY: 1 / 3,
+    relativeY: 0.5,
     x: 500,
-    y: bounds.y + bounds.height * (1 / 3)
+    y: 360
   });
   assert.equal(semanticCanvas.getNodePortCanvasAnchor!('视频', 'missing-port', bounds), undefined);
 });

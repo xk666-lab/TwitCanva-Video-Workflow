@@ -66,9 +66,10 @@ function SimplePortHandle({
   const sideClassName = side === 'left'
     ? '-left-3 -translate-x-1/2'
     : '-right-3 translate-x-1/2';
-  const visibilityClassName = selected || isConnectionActive
-    ? 'opacity-100'
-    : 'opacity-80 group-hover/node:opacity-100';
+  const isHandleVisible = selected || isConnectionActive;
+  const visibilityClassName = isHandleVisible
+    ? 'pointer-events-auto opacity-100'
+    : 'pointer-events-none opacity-0';
   const feedbackClassName = feedbackState === 'source'
     ? 'scale-110 ring-2 ring-white/90'
     : feedbackState === 'compatible'
@@ -83,9 +84,11 @@ function SimplePortHandle({
   return (
     <button
       type="button"
+      aria-hidden={!isHandleVisible}
+      tabIndex={isHandleVisible ? 0 : -1}
       aria-label={side === 'left' ? 'Add or connect previous node' : 'Add or connect next node'}
       title={side === 'left' ? 'Add or connect previous node' : 'Add or connect next node'}
-      className={`pointer-events-auto absolute top-1/2 z-20 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border text-sm font-semibold leading-none shadow-lg backdrop-blur transition-all duration-150 ${sideClassName} ${visibilityClassName} ${themeClassName} ${feedbackClassName}`}
+      className={`absolute top-1/2 z-20 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border text-sm font-semibold leading-none shadow-lg backdrop-blur transition-all duration-150 ${sideClassName} ${visibilityClassName} ${themeClassName} ${feedbackClassName}`}
       onPointerDown={event => {
         event.preventDefault();
         event.stopPropagation();

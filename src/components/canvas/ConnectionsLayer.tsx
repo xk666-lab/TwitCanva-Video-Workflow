@@ -13,7 +13,6 @@ import {
     createConnectionRenderIndex,
     getNodePortCanvasAnchor
 } from '../../domain/graph/semanticCanvas.ts';
-import { getNodePort } from '../../domain/nodes/nodeRegistry.ts';
 import { calculateConnectionPath } from '../../utils/connectionHelpers';
 import type { CanvasNodeSize } from '../../utils/connectionHitTesting.ts';
 
@@ -239,11 +238,6 @@ export const ConnectionsLayer: React.FC<ConnectionsLayerProps> = ({
 
             const path = calculateConnectionPath(startX, startY, endX, endY, sourceAnchor.side);
             const isSelected = selectedEdgeId === edge.id;
-            const sourcePort = getNodePort(parent.type, edge.sourcePortId);
-            const targetPort = getNodePort(node.type, edge.targetPortId);
-            const edgeLabel = `${targetPort?.label || edge.targetPortId} · ${edge.dataType}`;
-            const labelX = (startX + endX) / 2;
-            const labelY = (startY + endY) / 2 - 8;
 
             connections.push(
                 <g
@@ -259,20 +253,9 @@ export const ConnectionsLayer: React.FC<ConnectionsLayerProps> = ({
                             : (canvasTheme === 'dark' ? '#444' : '#d1d5db')}
                         strokeWidth="2"
                         fill="none"
+                        strokeLinecap="round"
                         className={`transition-colors ${!isSelected ? (canvasTheme === 'dark' ? 'group-hover:stroke-neutral-300' : 'group-hover:stroke-neutral-500') : ''}`}
                     />
-                    <text
-                        x={labelX}
-                        y={labelY}
-                        textAnchor="middle"
-                        fill={canvasTheme === 'dark' ? '#d4d4d8' : '#334155'}
-                        stroke={canvasTheme === 'dark' ? '#050505' : '#f8fafc'}
-                        strokeWidth="4"
-                        paintOrder="stroke"
-                        className={`pointer-events-none text-[9px] font-medium tracking-wide transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-                    >
-                        {sourcePort ? edgeLabel : `${edge.dataType} 连接`}
-                    </text>
                 </g>
             );
     });

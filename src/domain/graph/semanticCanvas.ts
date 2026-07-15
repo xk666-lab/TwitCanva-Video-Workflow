@@ -139,14 +139,16 @@ export function getNodePortRailPlacement(
   const port = getNodePort(type, portId);
   if (!port || port.enabled === false) return undefined;
 
-  const ports = getVisibleNodePorts(type, port.direction);
-  const index = ports.findIndex(candidate => candidate.id === port.id);
-  if (index < 0) return undefined;
+  const hasVisiblePort = getVisibleNodePorts(type, port.direction)
+    .some(candidate => candidate.id === port.id);
+  if (!hasVisiblePort) return undefined;
 
   return {
     direction: port.direction,
     side: port.direction === 'input' ? 'left' : 'right',
-    relativeY: (index + 1) / (ports.length + 1)
+    // LibTV-style merged rails: semantic ports still exist for validation,
+    // but the canvas draws one visual handle per side at the card midpoint.
+    relativeY: 0.5
   };
 }
 
