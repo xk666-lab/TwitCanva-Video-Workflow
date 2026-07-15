@@ -6,9 +6,16 @@
  */
 
 import React from 'react';
-import { NodeData, NodeStatus, NodeType, Viewport } from '../../types';
+import { NodeData, NodeStatus, NodeType } from '../../types';
 import type { CanvasEdge } from '../../domain/graph/graphTypes';
+import type { CanvasPortEndpoint } from '../../domain/graph/semanticCanvas.ts';
+import {
+    createConnectionRenderIndex,
+    getNodePortCanvasAnchor
+} from '../../domain/graph/semanticCanvas.ts';
+import { getNodePort } from '../../domain/nodes/nodeRegistry.ts';
 import { calculateConnectionPath } from '../../utils/connectionHelpers';
+import type { CanvasNodeSize } from '../../utils/connectionHitTesting.ts';
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -156,10 +163,10 @@ const getNodeHeight = (node: NodeData, parentNode?: NodeData): number => {
 interface ConnectionsLayerProps {
     nodes: NodeData[];
     edges: CanvasEdge[];
-    viewport: Viewport;
+    nodeSizes: Record<string, CanvasNodeSize>;
     // Connection dragging state
     isDraggingConnection: boolean;
-    connectionStart: { nodeId: string; handle: 'left' | 'right' } | null;
+    connectionStart: CanvasPortEndpoint | null;
     tempConnectionEnd: { x: number; y: number } | null;
     // Selection
     selectedEdgeId: string | null;
@@ -170,7 +177,7 @@ interface ConnectionsLayerProps {
 export const ConnectionsLayer: React.FC<ConnectionsLayerProps> = ({
     nodes,
     edges,
-    viewport,
+    nodeSizes,
     isDraggingConnection,
     connectionStart,
     tempConnectionEnd,
@@ -178,12 +185,14 @@ export const ConnectionsLayer: React.FC<ConnectionsLayerProps> = ({
     onEdgeClick,
     canvasTheme = 'dark'
 }) => {
+    const connectionRenderIndex = createConnectionRenderIndex(nodes, edges);
+
     // Render permanent connections between nodes
     const connections: React.ReactNode[] = [];
 
     edges.forEach((edge, edgeIndex) => {
-            const parent = nodes.find(node => node.id === edge.sourceNodeId);
-            const node = nodes.find(candidate => candidate.id === edge.targetNodeId);
+            const parent = connectionRenderIndex.nodesById.get(edge.sourceNodeId);
+            const node = connectionRenderIndex.nodesById.get(edge.targetNodeId);
             if (!parent || !node) {
                 if (import.meta.env.DEV) {
                     console.warn(`[ConnectionsLayer] Ignoring edge ${edge.id} because a node is missing.`);
@@ -191,20 +200,50 @@ export const ConnectionsLayer: React.FC<ConnectionsLayerProps> = ({
                 return;
             }
 
-            const parallelEdges = edges.filter(candidate =>
-                candidate.sourceNodeId === edge.sourceNodeId && candidate.targetNodeId === edge.targetNodeId
-            );
-            const parallelIndex = parallelEdges.findIndex(candidate => candidate.id === edge.id);
-            const offset = parallelEdges.length > 1
-                ? (parallelIndex - (parallelEdges.length - 1) / 2) * 6
+            const parallelLayout = connectionRenderIndex.parallelEdgeLayoutById.get(edge.id);
+            const parallelIndex = parallelLayout?.index ?? 0;
+            const parallelCount = parallelLayout?.count ?? 1;
+            const offset = parallelCount > 1
+                ? (parallelIndex - (parallelCount - 1) / 2) * 6
                 : 0;
-            const startX = parent.x + getNodeWidth(parent);
-            const startY = parent.y + getNodeHeight(parent) / 2 + offset;
-            const endX = node.x;
-            const endY = node.y + getNodeHeight(node, parent) / 2 + offset;
+            const parentSize = nodeSizes[parent.id];
+            const targetSize = nodeSizes[node.id];
+            const parentWidth = parentSize?.width ?? getNodeWidth(parent);
+            const parentHeight = parentSize?.height ?? getNodeHeight(parent);
+            const nodeWidth = targetSize?.width ?? getNodeWidth(node, parent);
+            const nodeHeight = targetSize?.height ?? getNodeHeight(node, parent);
+            const sourceAnchor = getNodePortCanvasAnchor(parent.type, edge.sourcePortId, {
+                x: parent.x,
+                y: parent.y,
+                width: parentWidth,
+                height: parentHeight
+            }) || {
+                side: 'right' as const,
+                x: parent.x + parentWidth,
+                y: parent.y + parentHeight / 2
+            };
+            const targetAnchor = getNodePortCanvasAnchor(node.type, edge.targetPortId, {
+                x: node.x,
+                y: node.y,
+                width: nodeWidth,
+                height: nodeHeight
+            }) || {
+                side: 'left' as const,
+                x: node.x,
+                y: node.y + nodeHeight / 2
+            };
+            const startX = sourceAnchor.x;
+            const startY = sourceAnchor.y + offset;
+            const endX = targetAnchor.x;
+            const endY = targetAnchor.y + offset;
 
-            const path = calculateConnectionPath(startX, startY, endX, endY, 'right');
+            const path = calculateConnectionPath(startX, startY, endX, endY, sourceAnchor.side);
             const isSelected = selectedEdgeId === edge.id;
+            const sourcePort = getNodePort(parent.type, edge.sourcePortId);
+            const targetPort = getNodePort(node.type, edge.targetPortId);
+            const edgeLabel = `${targetPort?.label || edge.targetPortId} · ${edge.dataType}`;
+            const labelX = (startX + endX) / 2;
+            const labelY = (startY + endY) / 2 - 8;
 
             connections.push(
                 <g
@@ -222,6 +261,18 @@ export const ConnectionsLayer: React.FC<ConnectionsLayerProps> = ({
                         fill="none"
                         className={`transition-colors ${!isSelected ? (canvasTheme === 'dark' ? 'group-hover:stroke-neutral-300' : 'group-hover:stroke-neutral-500') : ''}`}
                     />
+                    <text
+                        x={labelX}
+                        y={labelY}
+                        textAnchor="middle"
+                        fill={canvasTheme === 'dark' ? '#d4d4d8' : '#334155'}
+                        stroke={canvasTheme === 'dark' ? '#050505' : '#f8fafc'}
+                        strokeWidth="4"
+                        paintOrder="stroke"
+                        className={`pointer-events-none text-[9px] font-medium tracking-wide transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                    >
+                        {sourcePort ? edgeLabel : `${edge.dataType} 连接`}
+                    </text>
                 </g>
             );
     });
@@ -229,19 +280,32 @@ export const ConnectionsLayer: React.FC<ConnectionsLayerProps> = ({
     // Render temporary drag connection
     let tempLine = null;
     if (isDraggingConnection && connectionStart && tempConnectionEnd) {
-        const startNode = nodes.find(n => n.id === connectionStart.nodeId);
+        const startNode = connectionRenderIndex.nodesById.get(connectionStart.nodeId);
         if (startNode) {
-            const startX = connectionStart.handle === 'right' ? startNode.x + getNodeWidth(startNode) : startNode.x;
-            const startY = startNode.y + getNodeHeight(startNode) / 2;
-            const endX = (tempConnectionEnd.x - viewport.x) / viewport.zoom;
-            const endY = (tempConnectionEnd.y - viewport.y) / viewport.zoom;
+            const startSize = nodeSizes[startNode.id];
+            const startWidth = startSize?.width ?? getNodeWidth(startNode);
+            const startHeight = startSize?.height ?? getNodeHeight(startNode);
+            const startAnchor = getNodePortCanvasAnchor(startNode.type, connectionStart.portId, {
+                x: startNode.x,
+                y: startNode.y,
+                width: startWidth,
+                height: startHeight
+            }) || {
+                side: connectionStart.direction === 'input' ? 'left' as const : 'right' as const,
+                x: connectionStart.direction === 'input' ? startNode.x : startNode.x + startWidth,
+                y: startNode.y + startHeight / 2
+            };
+            const startX = startAnchor.x;
+            const startY = startAnchor.y;
+            const endX = tempConnectionEnd.x;
+            const endY = tempConnectionEnd.y;
 
             const path = calculateConnectionPath(
                 startX,
                 startY,
                 endX,
                 endY,
-                connectionStart.handle
+                startAnchor.side
             );
 
             tempLine = (

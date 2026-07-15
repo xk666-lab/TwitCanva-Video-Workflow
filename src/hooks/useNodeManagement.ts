@@ -11,8 +11,9 @@ import { createDefaultNodeData } from '../domain/nodes/nodeRegistry';
 import { applyNodeUpdateMap, type NodeUpdateMap } from '../domain/nodes/nodeUpdates';
 import { removeNodesAndNormalizeStoryboardMediaReferences } from '../domain/storyboard/storyboardGraph';
 import type { CanvasEdge, ConnectionValidationResult } from '../domain/graph/graphTypes';
-import { CURRENT_EDGE_SCHEMA_VERSION } from '../domain/graph/graphTypes';
-import { resolveConnectionPorts, validateConnection } from '../domain/graph/connectionRules';
+import { resolveConnectionPorts } from '../domain/graph/connectionRules';
+import { createSemanticEdge } from '../domain/graph/semanticCanvas';
+import { screenPointToCanvasPoint } from '../utils/connectionHitTesting';
 import {
     getIncomingEdges as selectIncomingEdges,
     getInputEdgesByPort as selectInputEdgesByPort,
@@ -25,6 +26,15 @@ import {
 } from '../domain/graph/edgeMigration';
 
 export type ValidateAndAddEdgeResult = ConnectionValidationResult & { edge?: CanvasEdge };
+export interface ExplicitEdgePorts {
+    sourcePortId: string;
+    targetPortId: string;
+}
+
+export interface AddConnectedNodeFromSourcesResult {
+    nodeId: string;
+    connectedCount: number;
+}
 
 export const useNodeManagement = () => {
     // ============================================================================
@@ -85,38 +95,44 @@ export const useNodeManagement = () => {
         commitGraph(syncLegacyParentIds(nodesRef.current, normalizedEdges), normalizedEdges);
     }, [commitGraph]);
 
-    const validateAndAddEdge = useCallback((sourceNodeId: string, targetNodeId: string): ValidateAndAddEdgeResult => {
+    const validateAndAddEdge = useCallback((
+        sourceNodeId: string,
+        targetNodeId: string,
+        explicitPorts?: ExplicitEdgePorts
+    ): ValidateAndAddEdgeResult => {
         const sourceNode = nodesRef.current.find(node => node.id === sourceNodeId);
         const targetNode = nodesRef.current.find(node => node.id === targetNodeId);
-        const resolution = resolveConnectionPorts(sourceNode, targetNode, edgesRef.current);
-        if (!resolution.valid) return resolution;
+        if (!sourceNode || !targetNode) {
+            return {
+                valid: false,
+                code: 'missing_node',
+                message: '找不到连接的源节点或目标节点。'
+            };
+        }
 
-        const validation = validateConnection({
+        let sourcePortId: string;
+        let targetPortId: string;
+        if (explicitPorts) {
+            sourcePortId = explicitPorts.sourcePortId;
+            targetPortId = explicitPorts.targetPortId;
+        } else {
+            const resolution = resolveConnectionPorts(sourceNode, targetNode, edgesRef.current);
+            if (!resolution.valid) return resolution;
+            sourcePortId = resolution.sourcePort.id;
+            targetPortId = resolution.targetPort.id;
+        }
+
+        const result = createSemanticEdge({
             sourceNode,
-            sourcePort: resolution.sourcePort,
+            sourcePortId,
             targetNode,
-            targetPort: resolution.targetPort,
+            targetPortId,
             existingEdges: edgesRef.current
         });
-        if (!validation.valid || !sourceNode || !targetNode) return validation;
+        if (!result.valid || !result.edge) return result;
 
-        const portEdges = selectInputEdgesByPort(edgesRef.current, targetNodeId, resolution.targetPort.id);
-        const nextOrder = resolution.targetPort.ordered
-            ? Math.max(-1, ...portEdges.map(edge => edge.order ?? -1)) + 1
-            : undefined;
-        const edge: CanvasEdge = {
-            schemaVersion: CURRENT_EDGE_SCHEMA_VERSION,
-            id: crypto.randomUUID(),
-            sourceNodeId,
-            sourcePortId: resolution.sourcePort.id,
-            targetNodeId,
-            targetPortId: resolution.targetPort.id,
-            dataType: resolution.sourcePort.dataType,
-            ...(nextOrder !== undefined ? { order: nextOrder } : {}),
-            createdAt: new Date().toISOString()
-        };
-        addEdge(edge);
-        return { valid: true, edge };
+        addEdge(result.edge);
+        return result;
     }, [addEdge]);
 
     // ============================================================================
@@ -136,16 +152,16 @@ export const useNodeManagement = () => {
         x: number,
         y: number,
         parentId: string | undefined,
-        viewport: Viewport
+        viewport: Viewport,
+        canvasRect: { left: number; top: number } = { left: 0, top: 0 }
     ) => {
-        const canvasX = (x - viewport.x) / viewport.zoom;
-        const canvasY = (y - viewport.y) / viewport.zoom;
+        const canvasPoint = screenPointToCanvasPoint({ x, y }, canvasRect, viewport);
 
         const newNode: NodeData = {
             ...createDefaultNodeData(type),
             id: crypto.randomUUID(),
-            x: parentId ? canvasX : canvasX - 170,
-            y: parentId ? canvasY : canvasY - 100,
+            x: parentId ? canvasPoint.x : canvasPoint.x - 170,
+            y: parentId ? canvasPoint.y : canvasPoint.y - 100,
             parentIds: parentId ? [parentId] : []
         };
 
@@ -154,6 +170,52 @@ export const useNodeManagement = () => {
 
         return newNode.id;
     };
+
+    const addConnectedNodeFromSources = useCallback((
+        type: NodeType,
+        sourceNodeIds: string[],
+        x: number,
+        y: number
+    ): AddConnectedNodeFromSourcesResult => {
+        const currentNodes = nodesRef.current;
+        const currentEdges = edgesRef.current;
+        const sourceNodes = sourceNodeIds
+            .map(sourceId => currentNodes.find(node => node.id === sourceId))
+            .filter((node): node is NodeData => Boolean(node));
+        const newNode: NodeData = {
+            ...createDefaultNodeData(type),
+            id: crypto.randomUUID(),
+            x,
+            y,
+            parentIds: []
+        };
+
+        let nextEdges = [...currentEdges];
+        let connectedCount = 0;
+        for (const sourceNode of sourceNodes) {
+            const resolution = resolveConnectionPorts(sourceNode, newNode, nextEdges);
+            if (!resolution.valid) continue;
+
+            const result = createSemanticEdge({
+                sourceNode,
+                sourcePortId: resolution.sourcePort.id,
+                targetNode: newNode,
+                targetPortId: resolution.targetPort.id,
+                existingEdges: nextEdges
+            });
+            if (!result.valid || !result.edge) continue;
+
+            nextEdges = [...nextEdges, result.edge];
+            connectedCount += 1;
+        }
+
+        const nextNodes = [...currentNodes, newNode];
+        const normalizedEdges = normalizeEdges(nextEdges, nextNodes);
+        commitGraph(syncLegacyParentIds(nextNodes, normalizedEdges), normalizedEdges);
+        setSelectedNodeIds([newNode.id]);
+
+        return { nodeId: newNode.id, connectedCount };
+    }, [commitGraph]);
 
     /**
      * Updates a node with partial data
@@ -275,6 +337,7 @@ export const useNodeManagement = () => {
         selectedNodeIds,
         setSelectedNodeIds,
         addNode,
+        addConnectedNodeFromSources,
         updateNode,
         applyNodeUpdates,
         deleteNode,

@@ -6,11 +6,13 @@
  */
 
 import React, { useRef, useState, useEffect } from 'react';
-import { Loader2, Maximize2, ImageIcon as ImageIcon, Film, Upload, Pencil, Video, GripVertical, Download, Expand, Shrink, HardDrive, Music2 } from 'lucide-react';
-import { NodeData, NodeStatus, NodeType } from '../../types';
+import { CheckCircle2, ImageIcon as ImageIcon, Film, Loader2, Upload, Pencil, Video, Expand, Shrink, HardDrive, Music2, Star, Trash2 } from 'lucide-react';
+import { NodeData, NodeType, type MediaTake } from '../../types';
 import { ScriptNodeContent } from './ScriptNodeContent';
 import { StoryboardNodeContent } from './StoryboardNodeContent';
 import { SubjectNodeContent } from './SubjectNodeContent';
+import { apiPost } from '../../services/apiClient';
+import { deleteTake, selectHeroTake, updateTakeMetadata } from '../../utils/takeHelpers';
 
 interface NodeContentProps {
     data: NodeData;
@@ -42,6 +44,238 @@ interface NodeContentProps {
     onAddStoryboardToTimeline?: (nodeId: string) => { valid: boolean; message?: string };
 }
 
+function clampProgress(value: unknown): number | undefined {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+    return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function formatDuration(seconds: number): string {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    if (minutes <= 0) return `${remainingSeconds}s`;
+    return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
+}
+
+function useGenerationElapsedSeconds(isLoading: boolean, startedAt?: number): number {
+    const getElapsed = () => {
+        if (!isLoading || !startedAt) return 0;
+        return Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    };
+    const [elapsedSeconds, setElapsedSeconds] = useState(getElapsed);
+
+    useEffect(() => {
+        if (!isLoading) {
+            setElapsedSeconds(0);
+            return;
+        }
+
+        const updateElapsed = () => setElapsedSeconds(getElapsed());
+        updateElapsed();
+        const intervalId = window.setInterval(updateElapsed, 1000);
+        return () => window.clearInterval(intervalId);
+    }, [isLoading, startedAt]);
+
+    return elapsedSeconds;
+}
+
+const GenerationProgressIndicator: React.FC<{
+    data: NodeData;
+    elapsedSeconds: number;
+}> = ({ data, elapsedSeconds }) => {
+    const progress = clampProgress(data.generationProgress);
+    const hasMeasuredProgress = progress !== undefined && progress > 0;
+    const displayProgress = hasMeasuredProgress ? progress : undefined;
+    const railWidth = displayProgress !== undefined ? `${Math.max(6, displayProgress)}%` : '46%';
+    const operationLabel = data.type === NodeType.VIDEO || data.type === NodeType.LOCAL_VIDEO_MODEL
+        ? 'Rendering video'
+        : data.type === NodeType.AUDIO
+            ? 'Processing audio'
+            : 'Rendering image';
+    const taskLabel = data.activeTaskId ? `Task ${data.activeTaskId.slice(0, 8)}` : 'Preparing task';
+    const valueLabel = displayProgress !== undefined ? `${displayProgress}%` : formatDuration(elapsedSeconds);
+
+    return (
+        <div className="relative w-[252px] max-w-[82%] overflow-hidden rounded-[18px] border border-white/[0.08] bg-[#07090a]/75 px-3.5 py-3 shadow-[0_18px_55px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_0%,rgba(103,232,249,0.18),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.08),transparent_46%)]" />
+            <div className="relative flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-2.5">
+                    <span className="relative mt-1 flex h-2.5 w-2.5 shrink-0">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-300 opacity-45" />
+                        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-cyan-200 shadow-[0_0_16px_rgba(103,232,249,0.75)]" />
+                    </span>
+                    <div className="min-w-0">
+                        <div className="truncate text-[12px] font-semibold text-white/90">{operationLabel}</div>
+                        <div className="mt-0.5 truncate text-[10px] text-white/35" title={data.activeTaskId}>{taskLabel}</div>
+                    </div>
+                </div>
+                <div className="shrink-0 text-right">
+                    <div className="font-mono text-[12px] font-medium tabular-nums text-cyan-100">{valueLabel}</div>
+                    <div className="mt-0.5 text-[9px] uppercase tracking-[0.14em] text-white/30">active</div>
+                </div>
+            </div>
+            <div className="relative mt-3 h-[3px] overflow-hidden rounded-full bg-white/[0.07]">
+                <div className="absolute inset-y-0 left-0 w-full bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.12),transparent)]" />
+                <div
+                    className={`relative h-full rounded-full bg-[linear-gradient(90deg,#67e8f9,#f8fafc,#22d3ee)] shadow-[0_0_18px_rgba(103,232,249,0.45)] transition-[width] duration-700 ${displayProgress === undefined ? 'animate-pulse' : ''}`}
+                    style={{ width: railWidth }}
+                />
+            </div>
+            <div className="relative mt-2 flex items-center justify-between gap-2 text-[10px] text-white/35">
+                <span className="truncate">Provider response</span>
+                <span className="shrink-0 font-mono tabular-nums">{elapsedSeconds > 0 ? formatDuration(elapsedSeconds) : '0s'}</span>
+            </div>
+        </div>
+    );
+};
+
+const ImageTakeGallery: React.FC<{
+    data: NodeData;
+    takes: MediaTake[];
+    isLoading: boolean;
+    selected: boolean;
+    elapsedSeconds: number;
+    onUpdate?: (nodeId: string, updates: Partial<NodeData>) => void;
+    onExpand?: (imageUrl: string) => void;
+}> = ({ data, takes, isLoading, selected, elapsedSeconds, onUpdate, onExpand }) => {
+    const [savingTakeIds, setSavingTakeIds] = useState<Set<string>>(new Set());
+
+    const patchNodeFrom = (nextNode: NodeData) => {
+        onUpdate?.(data.id, {
+            status: nextNode.status,
+            resultUrl: nextNode.resultUrl,
+            heroTakeId: nextNode.heroTakeId,
+            takes: nextNode.takes,
+            resultAspectRatio: nextNode.resultAspectRatio
+        });
+    };
+
+    const handleSelectTake = (take: MediaTake) => {
+        patchNodeFrom(selectHeroTake(data, take.id));
+    };
+
+    const handleDeleteTake = (event: React.MouseEvent, take: MediaTake) => {
+        event.stopPropagation();
+        patchNodeFrom(deleteTake(data, take.id));
+    };
+
+    const handleSaveTake = async (event: React.MouseEvent, take: MediaTake, index: number) => {
+        event.stopPropagation();
+        if (take.metadata?.savedToAssetLibrary || savingTakeIds.has(take.id)) return;
+
+        setSavingTakeIds(previous => new Set(previous).add(take.id));
+        try {
+            const response = await apiPost<{ asset: { id: string } }>('/api/library', {
+                sourceUrl: take.url,
+                name: `${(data.title || data.prompt || 'generated-image').slice(0, 36) || 'generated-image'}-${index + 1}`,
+                category: 'Generated',
+                meta: {
+                    nodeId: data.id,
+                    takeId: take.id,
+                    prompt: take.prompt,
+                    model: take.model
+                }
+            });
+            const nextNode = updateTakeMetadata(data, take.id, {
+                savedToAssetLibrary: true,
+                libraryAssetId: response.asset.id,
+                savedToAssetLibraryAt: new Date().toISOString()
+            });
+            patchNodeFrom(nextNode);
+        } catch (error) {
+            console.error('Failed to save take to asset library:', error);
+        } finally {
+            setSavingTakeIds(previous => {
+                const next = new Set(previous);
+                next.delete(take.id);
+                return next;
+            });
+        }
+    };
+
+    return (
+        <div className={`relative w-full bg-[#050505] ${!selected ? '' : 'rounded-xl overflow-hidden'}`}>
+            <div className={`grid gap-2 p-2 ${takes.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                {takes.map((take, index) => {
+                    const isHero = data.heroTakeId
+                        ? data.heroTakeId === take.id
+                        : data.resultUrl === take.url || take.isHero;
+                    const isSaved = Boolean(take.metadata?.savedToAssetLibrary);
+                    const isSaving = savingTakeIds.has(take.id);
+                    return (
+                        <div
+                            key={take.id}
+                            onPointerDown={event => event.stopPropagation()}
+                            onClick={() => handleSelectTake(take)}
+                            onDoubleClick={() => onExpand?.(take.url)}
+                            onKeyDown={event => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    handleSelectTake(take);
+                                }
+                            }}
+                            role="button"
+                            tabIndex={0}
+                            className={`group/take relative overflow-hidden rounded-xl border bg-black text-left transition-all ${isHero ? 'border-cyan-300 shadow-[0_0_0_1px_rgba(103,232,249,0.7),0_0_28px_rgba(34,211,238,0.24)]' : 'border-white/10 hover:border-white/35'}`}
+                        >
+                            <div className="aspect-square w-full bg-[#080808]">
+                                <img src={take.thumbnailUrl || take.url} alt={`Generated candidate ${index + 1}`} className="h-full w-full object-contain" />
+                            </div>
+                            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-black/10 opacity-80" />
+                            <div className="absolute left-2 top-2 flex items-center gap-1">
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${isHero ? 'bg-cyan-300 text-black' : 'bg-black/60 text-white/75'}`}>
+                                    {isHero ? '当前' : `#${index + 1}`}
+                                </span>
+                            </div>
+                            <div className={`absolute bottom-2 left-2 right-2 flex items-center justify-between gap-1 transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover/take:opacity-100 focus-within:opacity-100'}`}>
+                                <button
+                                    type="button"
+                                    onPointerDown={event => event.stopPropagation()}
+                                    onClick={event => {
+                                        event.stopPropagation();
+                                        handleSelectTake(take);
+                                    }}
+                                    className="flex h-7 items-center gap-1 rounded-full bg-black/70 px-2 text-[10px] font-medium text-white backdrop-blur hover:bg-cyan-400 hover:text-black"
+                                >
+                                    <Star size={12} />
+                                    选择
+                                </button>
+                                <div className="flex items-center gap-1">
+                                    <button
+                                        type="button"
+                                        onPointerDown={event => event.stopPropagation()}
+                                        onClick={event => handleSaveTake(event, take, index)}
+                                        className={`flex h-7 items-center gap-1 rounded-full px-2 text-[10px] font-medium backdrop-blur ${isSaved ? 'bg-emerald-400/90 text-black' : 'bg-black/70 text-white hover:bg-white hover:text-black'}`}
+                                        title={isSaved ? '已存入素材库' : '存入素材库'}
+                                    >
+                                        <CheckCircle2 size={12} />
+                                        {isSaving ? '保存中' : isSaved ? '已保存' : '素材库'}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onPointerDown={event => event.stopPropagation()}
+                                        onClick={event => handleDeleteTake(event, take)}
+                                        className="flex h-7 w-7 items-center justify-center rounded-full bg-black/70 text-white backdrop-blur hover:bg-red-500"
+                                        title="删除候选"
+                                    >
+                                        <Trash2 size={12} />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+
+            {isLoading && (
+                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/55 backdrop-blur-[3px]">
+                    <div className="pointer-events-none absolute inset-x-10 top-8 h-px bg-gradient-to-r from-transparent via-cyan-200/30 to-transparent" />
+                    <GenerationProgressIndicator data={data} elapsedSeconds={elapsedSeconds} />
+                </div>
+            )}
+        </div>
+    );
+};
+
 export const NodeContent: React.FC<NodeContentProps> = ({
     data,
     inputUrl,
@@ -72,7 +306,7 @@ export const NodeContent: React.FC<NodeContentProps> = ({
 
     // Local state for text node textarea to prevent lag
     const [localPrompt, setLocalPrompt] = useState(data.prompt || '');
-    const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const updateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastSentPromptRef = useRef<string | undefined>(data.prompt); // Track what we sent
 
     // Helper: Check if node is image-type (includes local image model)
@@ -82,6 +316,8 @@ export const NodeContent: React.FC<NodeContentProps> = ({
     // Helper: Check if node is local model
     const isLocalModel = data.type === NodeType.LOCAL_IMAGE_MODEL || data.type === NodeType.LOCAL_VIDEO_MODEL;
     const isAudioType = data.type === NodeType.AUDIO;
+    const generationElapsedSeconds = useGenerationElapsedSeconds(isLoading, data.generationStartTime);
+    const imageTakes = (data.takes || []).filter(take => take.type === 'image' && take.url);
 
     // Sync local state ONLY when data.prompt changes externally (not from our own update)
     useEffect(() => {
@@ -235,7 +471,17 @@ export const NodeContent: React.FC<NodeContentProps> = ({
             )}
 
             {/* Result View - Show when successful OR when regenerating (loading with existing content) */}
-            {(isSuccess || isLoading) && data.resultUrl ? (
+            {(isSuccess || isLoading) && isImageType && imageTakes.length > 1 ? (
+                <ImageTakeGallery
+                    data={data}
+                    takes={imageTakes}
+                    isLoading={isLoading}
+                    selected={selected}
+                    elapsedSeconds={generationElapsedSeconds}
+                    onUpdate={onUpdate}
+                    onExpand={onExpand}
+                />
+            ) : (isSuccess || isLoading) && data.resultUrl ? (
                 <div
                     className={`relative w-full bg-black group/image ${!selected ? '' : 'rounded-xl overflow-hidden'}`}
                     style={getAspectRatioStyle()}
@@ -248,9 +494,9 @@ export const NodeContent: React.FC<NodeContentProps> = ({
 
                     {/* Regenerating Overlay - Shows when loading with existing content */}
                     {isLoading && (
-                        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-20">
-                            <Loader2 size={40} className="animate-spin text-blue-400" />
-                            <span className="mt-3 text-sm text-white font-medium">Regenerating...</span>
+                        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/55 backdrop-blur-[3px]">
+                            <div className="pointer-events-none absolute inset-x-10 top-8 h-px bg-gradient-to-r from-transparent via-cyan-200/30 to-transparent" />
+                            <GenerationProgressIndicator data={data} elapsedSeconds={generationElapsedSeconds} />
                         </div>
                     )}
                 </div>
@@ -324,7 +570,6 @@ export const NodeContent: React.FC<NodeContentProps> = ({
             ) : (
                 /* Placeholder / Empty State for Image/Video */
                 <div className={`relative w-full aspect-[4/3] bg-[#141414] flex flex-col items-center justify-center gap-3 overflow-hidden
-            ${isLoading ? 'animate-pulse' : ''} 
             ${!selected ? 'rounded-2xl' : 'rounded-xl border border-dashed border-neutral-800'}`
                 }>
                     {/* Input Image Preview for Video Nodes */}
@@ -340,9 +585,9 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                     )}
 
                     {isLoading ? (
-                        <div className="relative z-10 flex flex-col items-center gap-2">
-                            <Loader2 size={32} className="animate-spin text-blue-400" />
-                            <span className="text-xs text-neutral-500 font-medium">Generating...</span>
+                        <div className="relative z-10 flex w-full flex-col items-center gap-3 px-4">
+                            <div className="absolute inset-x-6 top-1/2 h-20 -translate-y-1/2 rounded-full bg-cyan-400/10 blur-2xl" />
+                            <GenerationProgressIndicator data={data} elapsedSeconds={generationElapsedSeconds} />
                         </div>
                     ) : (
                         <div className="relative z-10 flex flex-col items-center gap-3">

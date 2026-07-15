@@ -514,6 +514,12 @@ test('legacy generate-image endpoint waits on the same task system and preserves
         createdAt: '2026-01-01T00:00:00.000Z',
         isHero: true
     };
+    const alternateTake = {
+        ...take,
+        id: 'take-2',
+        url: '/library/images/result-2.png',
+        isHero: false
+    };
     let submission;
     const server = await startTestServer({
         async submitTask(value) {
@@ -524,7 +530,7 @@ test('legacy generate-image endpoint waits on the same task system and preserves
             return createTask({
                 status: 'succeeded',
                 progress: 100,
-                output: { resultUrl: take.url, take }
+                output: { resultUrl: take.url, take, takes: [take, alternateTake] }
             });
         }
     }, libraryDir);
@@ -545,6 +551,7 @@ test('legacy generate-image endpoint waits on the same task system and preserves
     assert.equal(submission.operation, 'generate-image');
     assert.equal(body.resultUrl, take.url);
     assert.deepEqual(body.take, take);
+    assert.deepEqual(body.takes, [take, alternateTake]);
     assert.equal(body.task.taskId, 'task-1');
 });
 
@@ -565,7 +572,29 @@ test('legacy generation-status prefers the latest persisted task before scanning
                 model: 'gpt-image-2',
                 createdAt: '2026-01-01T00:00:00.000Z',
                 isHero: true
-            }
+            },
+            takes: [
+                {
+                    id: 'take-1',
+                    nodeId: 'node-1',
+                    type: 'image',
+                    url: '/library/images/result.png',
+                    prompt: 'A paper city',
+                    model: 'gpt-image-2',
+                    createdAt: '2026-01-01T00:00:00.000Z',
+                    isHero: true
+                },
+                {
+                    id: 'take-2',
+                    nodeId: 'node-1',
+                    type: 'image',
+                    url: '/library/images/result-2.png',
+                    prompt: 'A paper city',
+                    model: 'gpt-image-2',
+                    createdAt: '2026-01-01T00:00:01.000Z',
+                    isHero: false
+                }
+            ]
         },
         completedAt: '2026-01-01T00:01:00.000Z'
     });
@@ -582,6 +611,7 @@ test('legacy generation-status prefers the latest persisted task before scanning
     assert.equal(response.status, 200);
     assert.equal(body.status, 'success');
     assert.equal(body.resultUrl, '/library/images/result.png');
+    assert.equal(body.takes.length, 2);
     assert.equal(body.task.taskId, 'task-1');
 });
 
@@ -609,6 +639,20 @@ test('restart reconciliation only adopts media metadata written for the interrup
             sourceUrl: '/library/images/source.png'
         }
     }));
+    fs.writeFileSync(path.join(imagesDir, 'take-2.json'), JSON.stringify({
+        takeId: 'take-2',
+        nodeId: 'node-1',
+        generationTaskId: 'task-1',
+        filename: 'result-2.png',
+        prompt: 'Recovered second candidate',
+        model: 'gpt-image-2',
+        createdAt: '2026-01-01T00:00:02.000Z',
+        mediaType: 'image',
+        metadata: {
+            batchIndex: 1,
+            batchCount: 2
+        }
+    }));
     fs.writeFileSync(path.join(imagesDir, 'take-newer.json'), JSON.stringify({
         takeId: 'take-newer',
         nodeId: 'node-1',
@@ -631,6 +675,14 @@ test('restart reconciliation only adopts media metadata written for the interrup
 
     assert.equal(recovered.resultUrl, '/library/images/result.png');
     assert.equal(recovered.take.id, 'take-1');
+    assert.deepEqual(recovered.takes.map(take => ({
+        id: take.id,
+        url: take.url,
+        isHero: take.isHero
+    })), [
+        { id: 'take-1', url: '/library/images/result.png', isHero: true },
+        { id: 'take-2', url: '/library/images/result-2.png', isHero: false }
+    ]);
     assert.deepEqual(recovered.take.metadata, {
         operation: 'edit-image',
         mode: 'expand',

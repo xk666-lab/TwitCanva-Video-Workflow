@@ -86,9 +86,95 @@ export function appendHeroTake(node: NodeData, take: MediaTake): NodeData {
   };
 }
 
+export function appendHeroTakes(node: NodeData, takes: MediaTake[]): NodeData {
+  if (takes.length === 0) return node;
+
+  const normalizedNode = normalizeLegacyNodeTakes(node);
+  const incomingIds = new Set(takes.map(take => take.id));
+  const existingTakes = (normalizedNode.takes || []).filter(existingTake => !incomingIds.has(existingTake.id));
+  const heroTake = takes.find(take => take.isHero) || takes[0];
+
+  return {
+    ...normalizedNode,
+    heroTakeId: heroTake.id,
+    resultUrl: heroTake.url,
+    takes: [
+      ...existingTakes.map(existingTake => ({ ...existingTake, isHero: false })),
+      ...takes.map(take => ({ ...take, isHero: take.id === heroTake.id }))
+    ]
+  };
+}
+
+export function selectHeroTake(node: NodeData, takeId: string): NodeData {
+  const normalizedNode = normalizeLegacyNodeTakes(node);
+  const takes = normalizedNode.takes || [];
+  const heroTake = takes.find(take => take.id === takeId);
+  if (!heroTake) return normalizedNode;
+
+  return {
+    ...normalizedNode,
+    heroTakeId: heroTake.id,
+    resultUrl: heroTake.url,
+    takes: takes.map(take => ({ ...take, isHero: take.id === heroTake.id }))
+  };
+}
+
+export function deleteTake(node: NodeData, takeId: string): NodeData {
+  const normalizedNode = normalizeLegacyNodeTakes(node);
+  const remainingTakes = (normalizedNode.takes || []).filter(take => take.id !== takeId);
+  const previousHeroId = normalizedNode.heroTakeId || getHeroTake(normalizedNode)?.id;
+
+  if (remainingTakes.length === 0) {
+    return {
+      ...normalizedNode,
+      status: 'idle' as NodeData['status'],
+      resultUrl: undefined,
+      heroTakeId: undefined,
+      takes: [],
+      resultAspectRatio: undefined
+    };
+  }
+
+  const nextHero = previousHeroId === takeId
+    ? remainingTakes[remainingTakes.length - 1]
+    : remainingTakes.find(take => take.id === previousHeroId) || remainingTakes[remainingTakes.length - 1];
+
+  return {
+    ...normalizedNode,
+    heroTakeId: nextHero.id,
+    resultUrl: nextHero.url,
+    takes: remainingTakes.map(take => ({ ...take, isHero: take.id === nextHero.id })),
+    resultAspectRatio: previousHeroId === nextHero.id ? normalizedNode.resultAspectRatio : undefined
+  };
+}
+
+export function updateTakeMetadata(
+  node: NodeData,
+  takeId: string,
+  metadata: Record<string, unknown>
+): NodeData {
+  const normalizedNode = normalizeLegacyNodeTakes(node);
+  const takes = (normalizedNode.takes || []).map(take => take.id === takeId
+    ? {
+        ...take,
+        metadata: {
+          ...(take.metadata || {}),
+          ...metadata
+        }
+      }
+    : take
+  );
+
+  return {
+    ...normalizedNode,
+    takes
+  };
+}
+
 export interface GenerationSuccessResult {
   resultUrl: string;
   take?: MediaTake;
+  takes?: MediaTake[];
 }
 
 export function buildGenerationSuccessUpdate(
@@ -103,6 +189,16 @@ export function buildGenerationSuccessUpdate(
     generationStartTime: undefined,
     ...extraUpdates
   };
+
+  if (result.takes && result.takes.length > 0) {
+    const nodeWithTakes = appendHeroTakes(node, result.takes);
+    return {
+      ...updates,
+      resultUrl: nodeWithTakes.resultUrl,
+      takes: nodeWithTakes.takes,
+      heroTakeId: nodeWithTakes.heroTakeId
+    };
+  }
 
   if (!result.take) return updates;
 

@@ -39,7 +39,8 @@ const genericDefaults = (): Omit<NodeCreationDefaults, 'type'> => ({
 const imageDefaults = (): Omit<NodeCreationDefaults, 'type'> => ({
   ...genericDefaults(),
   model: 'gpt-image-2',
-  imageModel: 'gpt-image-2'
+  imageModel: 'gpt-image-2',
+  imageCount: 1
 });
 
 const videoDefaults = (): Omit<NodeCreationDefaults, 'type'> => ({
@@ -296,6 +297,19 @@ export function getNodeCapabilities(type: unknown): NodeCapabilities | undefined
 
 export function listNodeDefinitions(): NodeDefinition[] {
   return [...definitions];
+}
+
+export function searchNodeDefinitions(query: string): NodeDefinition[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  if (!normalizedQuery) return listNodeDefinitions();
+
+  return definitions.filter(definition => [
+    definition.type,
+    definition.label,
+    definition.description,
+    definition.category,
+    definition.icon
+  ].some(value => String(value || '').toLocaleLowerCase().includes(normalizedQuery)));
 }
 
 export function getNodePort(type: unknown, portId: string): NodePortDefinition | undefined {

@@ -25,8 +25,14 @@ function terminalErrorUpdate(task: GenerationTask): Partial<NodeData> {
       : 'Generation failed.'),
     activeTaskId: undefined,
     lastTaskId: task.taskId,
+    generationProgress: undefined,
     generationStartTime: undefined
   };
+}
+
+function normalizeTaskProgress(progress: unknown): number | undefined {
+  if (typeof progress !== 'number' || !Number.isFinite(progress)) return undefined;
+  return Math.max(0, Math.min(100, Math.round(progress)));
 }
 
 export function getUniqueActiveTaskIds(nodes: NodeData[]): string[] {
@@ -68,6 +74,7 @@ export function buildStoryTaskStartUpdates(
     status: 'loading' as NodeData['status'],
     activeTaskId: task.taskId,
     errorMessage: undefined,
+    generationProgress: normalizeTaskProgress(task.progress),
     generationStartTime: new Date(task.createdAt).getTime()
   };
   return { [script.id]: update, [storyboard.id]: update };
@@ -102,6 +109,7 @@ export function buildGenerationTaskNodeUpdates(
     const loading = {
       status: 'loading' as NodeData['status'],
       activeTaskId: task.taskId,
+      generationProgress: normalizeTaskProgress(task.progress),
       errorMessage: undefined
     };
     return { [script.id]: loading, [storyboard.id]: loading };
@@ -117,6 +125,7 @@ export function buildGenerationTaskNodeUpdates(
       activeTaskId: undefined,
       lastTaskId: task.taskId,
       errorMessage: undefined,
+      generationProgress: undefined,
       generationStartTime: undefined
     },
     [storyboard.id]: {
@@ -125,6 +134,7 @@ export function buildGenerationTaskNodeUpdates(
       activeTaskId: undefined,
       lastTaskId: task.taskId,
       errorMessage: undefined,
+      generationProgress: undefined,
       generationStartTime: undefined
     }
   };

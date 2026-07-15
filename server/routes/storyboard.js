@@ -321,7 +321,16 @@ Respond with ONLY the optimized story text.`;
 router.post('/generate-composite', async (req, res) => {
     try {
         const { scripts, styleAnchor, characterDNA, sceneCount, referenceImages, characterImages, imageModel } = req.body;
-        const { GEMINI_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_IMAGE_MODEL } = req.app.locals;
+        const {
+            GEMINI_API_KEY,
+            OPENAI_API_KEY,
+            OPENAI_BASE_URL,
+            OPENAI_IMAGE_API_KEY,
+            OPENAI_IMAGE_BASE_URL,
+            OPENAI_IMAGE_MODEL
+        } = req.app.locals;
+        const openaiImageApiKey = OPENAI_IMAGE_API_KEY || OPENAI_API_KEY;
+        const openaiImageBaseURL = OPENAI_IMAGE_BASE_URL || OPENAI_BASE_URL;
         const { resolveImageToBase64 } = await import('../utils/imageHelpers.js');
 
         if (!scripts || scripts.length === 0) {
@@ -333,9 +342,9 @@ router.post('/generate-composite', async (req, res) => {
         const selectedImageModel = imageModel || OPENAI_IMAGE_MODEL || 'gpt-image-2';
         const useOpenAIImage = selectedImageModel.startsWith('gpt-image-');
 
-        if (useOpenAIImage && !OPENAI_API_KEY) {
+        if (useOpenAIImage && !openaiImageApiKey) {
             return res.status(500).json({
-                error: "OpenAI API key not configured. Add OPENAI_API_KEY to .env"
+                error: "OpenAI API key not configured. Add OPENAI_IMAGE_API_KEY or OPENAI_API_KEY to .env"
             });
         }
 
@@ -585,8 +594,8 @@ CRITICAL:
                 imageBase64Array: referenceBase64Array.length > 0 ? referenceBase64Array : undefined,
                 aspectRatio: '1536x1024',
                 resolution: '1K',
-                apiKey: OPENAI_API_KEY,
-                baseURL: OPENAI_BASE_URL,
+                apiKey: openaiImageApiKey,
+                baseURL: openaiImageBaseURL,
                 model: selectedImageModel
             });
 

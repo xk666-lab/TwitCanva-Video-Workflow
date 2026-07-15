@@ -115,11 +115,13 @@ export const useGenerationRecovery = ({
                     : currentNode.activeTaskId)) return;
                 if (generationMarker && currentNode.generationStartTime !== generationMarker) return;
                 updateNode(nodeId, {
-                    ...buildGenerationSuccessUpdate(currentNode, { resultUrl: data.resultUrl, take: data.take }),
+                    ...buildGenerationSuccessUpdate(currentNode, { resultUrl: data.resultUrl, take: data.take, takes: data.takes }),
                     ...extraUpdates,
+                    generationProgress: undefined,
                     ...(expectedTaskId ? {
                         activeTaskId: undefined,
-                        lastTaskId: expectedTaskId
+                        lastTaskId: expectedTaskId,
+                        generationProgress: undefined
                     } : {})
                 });
             } else if (data.status === 'error' || data.status === 'cancelled') {
@@ -136,6 +138,7 @@ export const useGenerationRecovery = ({
                         : 'Generation failed.'),
                     activeTaskId: undefined,
                     lastTaskId: expectedTaskId || data.task?.taskId,
+                    generationProgress: undefined,
                     generationStartTime: undefined
                 });
             }

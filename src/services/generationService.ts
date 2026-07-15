@@ -7,7 +7,7 @@
  * - Video: Veo 3.1, Kling AI
  */
 
-import type { GenerationTask } from '../domain/generation/generationTask.ts';
+import type { GenerationTask, MediaGenerationTaskOutput } from '../domain/generation/generationTask.ts';
 import type { ImageEditTaskInput } from '../domain/imageEditing/imageEdit.ts';
 import type { GenerateStoryPackageTaskInput } from '../domain/storyboard/storyboardTypes.ts';
 import type { SubjectReferenceSnapshot } from '../domain/subjects/subjectAsset.ts';
@@ -20,6 +20,7 @@ export interface GenerateImageParams {
   resolution?: string;
   imageBase64?: string | string[]; // Supports single image or array of images
   imageModel?: string; // Image model version (e.g., 'gemini-pro', 'kling-v2')
+  imageCount?: 1 | 2 | 4;
   nodeId?: string; // ID of the node initiating generation
   // Kling V1.5 reference settings
   klingReferenceMode?: 'subject' | 'face';
@@ -54,6 +55,7 @@ const normalizeNetworkError = (error: unknown, mediaType: 'image' | 'video'): Er
 export interface GenerationResult {
   resultUrl: string;
   take?: MediaTake;
+  takes?: MediaTake[];
   task: GenerationTask;
 }
 
@@ -88,6 +90,11 @@ const isTerminalTask = (task: GenerationTask): boolean =>
 
 const delay = (milliseconds: number): Promise<void> =>
   new Promise(resolve => setTimeout(resolve, milliseconds));
+
+const isMediaOutput = (
+  output: GenerationTask['output']
+): output is MediaGenerationTaskOutput =>
+  Boolean(output && 'resultUrl' in output && typeof output.resultUrl === 'string' && output.resultUrl.length > 0);
 
 export const getGenerationTask = async (taskId: string): Promise<GenerationTask> => {
   const response = await apiGet<GenerationTaskResponse>(`/api/generation-tasks/${encodeURIComponent(taskId)}`);
@@ -185,12 +192,14 @@ export const generateImage = async (
     const terminalTask = isTerminalTask(task)
       ? task
       : await waitForGenerationTask(task.taskId, options.pollIntervalMs);
-    if (terminalTask.status !== 'succeeded' || !terminalTask.output?.resultUrl) {
+    const output = terminalTask.output;
+    if (terminalTask.status !== 'succeeded' || !isMediaOutput(output)) {
       throw new GenerationTaskError(terminalTask);
     }
     return {
-      resultUrl: terminalTask.output.resultUrl,
-      take: terminalTask.output.take,
+      resultUrl: output.resultUrl,
+      take: output.take,
+      takes: output.takes,
       task: terminalTask
     };
 
@@ -212,12 +221,14 @@ export const generateVideo = async (
     const terminalTask = isTerminalTask(task)
       ? task
       : await waitForGenerationTask(task.taskId, options.pollIntervalMs);
-    if (terminalTask.status !== 'succeeded' || !terminalTask.output?.resultUrl) {
+    const output = terminalTask.output;
+    if (terminalTask.status !== 'succeeded' || !isMediaOutput(output)) {
       throw new GenerationTaskError(terminalTask);
     }
     return {
-      resultUrl: terminalTask.output.resultUrl,
-      take: terminalTask.output.take,
+      resultUrl: output.resultUrl,
+      take: output.take,
+      takes: output.takes,
       task: terminalTask
     };
 

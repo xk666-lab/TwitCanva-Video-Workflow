@@ -286,6 +286,9 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
 
   // 3. Add Nodes Menu (Global Submenu OR Connector Default)
   const title = isConnector ? "基于此节点继续生成" : "添加节点";
+  const menuWidthClassName = isConnector
+    ? 'w-[410px] max-w-[calc(100vw-24px)]'
+    : 'w-64';
 
   return (
     <div
@@ -296,7 +299,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         top: state.y,
         zIndex: 1000
       }}
-      className={`w-64 border rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-100 ${canvasTheme === 'dark' ? 'bg-[#1e1e1e] border-neutral-800' : 'bg-white border-neutral-200'
+      className={`${menuWidthClassName} border rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-100 ${canvasTheme === 'dark' ? 'bg-[#1e1e1e] border-neutral-800' : 'bg-white border-neutral-200'
         }`}
     >
       <div className={`px-4 py-3 text-sm font-medium border-b ${canvasTheme === 'dark' ? 'text-neutral-400 border-neutral-800' : 'text-neutral-500 border-neutral-100'

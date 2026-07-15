@@ -81,7 +81,7 @@ test('frameInputs take precedence when migrating start and end frames', () => {
   assert.equal(edges.find(item => item.sourceNodeId === 'end')?.targetPortId, 'end-frame');
 });
 
-test('additional legacy image inputs migrate to ordered reference edges', () => {
+test('legacy image inputs without frameInputs migrate to ordered reference edges', () => {
   const nodes = [
     node('one', '图片'),
     node('two', '图片'),
@@ -89,10 +89,10 @@ test('additional legacy image inputs migrate to ordered reference edges', () => 
     node('video', '视频', { parentIds: ['one', 'two', 'three'] })
   ];
   const edges = migrateParentIdsToEdges(nodes);
-  const reference = edges.find(item => item.sourceNodeId === 'three');
+  const references = edges.filter(item => item.targetPortId === 'reference-images');
 
-  assert.equal(reference?.targetPortId, 'reference-images');
-  assert.equal(reference?.order, 0);
+  assert.deepEqual(references.map(item => item.sourceNodeId), ['one', 'two', 'three']);
+  assert.deepEqual(references.map(item => item.order), [0, 1, 2]);
 });
 
 test('removing a node removes all incoming and outgoing edges', () => {
@@ -207,6 +207,6 @@ test('legacy node state updates create and remove matching edges centrally', () 
   const removed = reconcileEdgesFromLegacyNodeChanges([source, target], [source], added, () => undefined);
 
   assert.equal(added.length, 1);
-  assert.equal(added[0].targetPortId, 'start-frame');
+  assert.equal(added[0].targetPortId, 'reference-images');
   assert.deepEqual(removed, []);
 });

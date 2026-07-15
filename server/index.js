@@ -113,6 +113,8 @@ if (!HAILUO_API_KEY) {
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL;
+const OPENAI_IMAGE_API_KEY = process.env.OPENAI_IMAGE_API_KEY;
+const OPENAI_IMAGE_BASE_URL = process.env.OPENAI_IMAGE_BASE_URL;
 const OPENAI_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL;
 const OPENAI_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL;
 const OPENAI_CHAT_COMPLETIONS_PATH = process.env.OPENAI_CHAT_COMPLETIONS_PATH;
@@ -121,8 +123,8 @@ const SEEDANCE_BASE_URL = process.env.SEEDANCE_BASE_URL;
 const SEEDANCE_SUBMIT_PATH = process.env.SEEDANCE_SUBMIT_PATH;
 const SEEDANCE_STATUS_PATH = process.env.SEEDANCE_STATUS_PATH;
 
-if (!OPENAI_API_KEY) {
-    console.warn("SERVER WARNING: OPENAI_API_KEY not set. OpenAI GPT Image models will not work.");
+if (!OPENAI_API_KEY && !OPENAI_IMAGE_API_KEY) {
+    console.warn("SERVER WARNING: OPENAI_API_KEY or OPENAI_IMAGE_API_KEY not set. OpenAI GPT Image models will not work.");
 }
 
 // ============================================================================
@@ -142,6 +144,8 @@ app.locals.KLING_SECRET_KEY = KLING_SECRET_KEY;
 app.locals.HAILUO_API_KEY = HAILUO_API_KEY;
 app.locals.OPENAI_API_KEY = OPENAI_API_KEY;
 app.locals.OPENAI_BASE_URL = OPENAI_BASE_URL;
+app.locals.OPENAI_IMAGE_API_KEY = OPENAI_IMAGE_API_KEY;
+app.locals.OPENAI_IMAGE_BASE_URL = OPENAI_IMAGE_BASE_URL;
 app.locals.OPENAI_IMAGE_MODEL = OPENAI_IMAGE_MODEL;
 app.locals.OPENAI_TEXT_MODEL = OPENAI_TEXT_MODEL;
 app.locals.OPENAI_CHAT_COMPLETIONS_PATH = OPENAI_CHAT_COMPLETIONS_PATH;

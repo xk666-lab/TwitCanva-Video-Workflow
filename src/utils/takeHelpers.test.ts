@@ -2,7 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import type { MediaTake, NodeData, NodeStatus, NodeType } from '../types.ts';
-import { appendHeroTake, buildGenerationSuccessUpdate, getHeroTake, normalizeLegacyNodeTakes } from './takeHelpers.ts';
+import {
+  appendHeroTake,
+  buildGenerationSuccessUpdate,
+  deleteTake,
+  getHeroTake,
+  normalizeLegacyNodeTakes,
+  selectHeroTake
+} from './takeHelpers.ts';
 
 function imageNode(overrides: Partial<NodeData> = {}): NodeData {
   return {
@@ -80,4 +87,60 @@ test('appendHeroTake appends a new take and keeps resultUrl pointed at the hero'
   assert.equal(hero?.url, '/library/images/new.png');
   assert.equal(updated.takes?.length, 2);
   assert.deepEqual(updated.takes?.map(take => take.isHero), [false, true]);
+});
+
+test('buildGenerationSuccessUpdate appends multiple image takes as selectable candidates', () => {
+  const loadingNode = imageNode({
+    status: 'loading' as NodeStatus,
+    resultUrl: undefined
+  });
+  const takes: MediaTake[] = [1, 2, 3, 4].map(index => ({
+    id: `take-${index}`,
+    nodeId: 'node-1',
+    type: 'image',
+    url: `/library/images/${index}.png`,
+    prompt: `candidate ${index}`,
+    model: 'gpt-image-2',
+    createdAt: `2026-07-13T00:00:0${index}.000Z`,
+    isHero: index === 1
+  }));
+
+  const updates = buildGenerationSuccessUpdate(loadingNode, {
+    resultUrl: takes[0].url,
+    take: takes[0],
+    takes
+  });
+
+  assert.equal(updates.status, 'success');
+  assert.equal(updates.resultUrl, '/library/images/1.png');
+  assert.equal(updates.heroTakeId, 'take-1');
+  assert.equal(updates.takes?.length, 4);
+  assert.deepEqual(updates.takes?.map(take => take.isHero), [true, false, false, false]);
+});
+
+test('selectHeroTake and deleteTake keep legacy resultUrl synchronized with candidates', () => {
+  const node = buildGenerationSuccessUpdate(imageNode({ resultUrl: undefined }), {
+    resultUrl: '/library/images/1.png',
+    takes: [1, 2, 3].map(index => ({
+      id: `take-${index}`,
+      nodeId: 'node-1',
+      type: 'image',
+      url: `/library/images/${index}.png`,
+      prompt: `candidate ${index}`,
+      model: 'gpt-image-2',
+      createdAt: `2026-07-13T00:00:0${index}.000Z`,
+      isHero: index === 1
+    }))
+  }) as NodeData;
+
+  const selected = selectHeroTake({ ...imageNode({ resultUrl: undefined }), ...node }, 'take-2');
+  assert.equal(selected.resultUrl, '/library/images/2.png');
+  assert.equal(selected.heroTakeId, 'take-2');
+  assert.deepEqual(selected.takes?.map(take => take.isHero), [false, true, false]);
+
+  const deleted = deleteTake(selected, 'take-2');
+  assert.equal(deleted.resultUrl, '/library/images/3.png');
+  assert.equal(deleted.heroTakeId, 'take-3');
+  assert.deepEqual(deleted.takes?.map(take => take.id), ['take-1', 'take-3']);
+  assert.deepEqual(deleted.takes?.map(take => take.isHero), [false, true]);
 });

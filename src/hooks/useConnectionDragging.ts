@@ -7,11 +7,18 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { NodeData, Viewport } from '../types';
-import type { ValidateAndAddEdgeResult } from './useNodeManagement';
+import type { CanvasPortEndpoint } from '../domain/graph/semanticCanvas.ts';
+import {
+    findConnectionTargetNode,
+    isConnectionClick,
+    screenPointToCanvasPoint,
+    type CanvasNodeSize
+} from '../utils/connectionHitTesting.ts';
 
-interface ConnectionStart {
-    nodeId: string;
-    handle: 'left' | 'right';
+export interface ConnectionDragDrop {
+    start: CanvasPortEndpoint;
+    targetNodeId?: string;
+    targetPort?: CanvasPortEndpoint;
 }
 
 export const useConnectionDragging = () => {
@@ -20,14 +27,18 @@ export const useConnectionDragging = () => {
     // ============================================================================
 
     const [isDraggingConnection, setIsDraggingConnection] = useState(false);
-    const [connectionStart, setConnectionStart] = useState<ConnectionStart | null>(null);
+    const [connectionStart, setConnectionStart] = useState<CanvasPortEndpoint | null>(null);
     const [tempConnectionEnd, setTempConnectionEnd] = useState<{ x: number; y: number } | null>(null);
     const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
-    const [hoveredSide, setHoveredSide] = useState<'left' | 'right' | null>(null);
+    const [hoveredPort, setHoveredPort] = useState<CanvasPortEndpoint | null>(null);
     const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
     const [connectionError, setConnectionError] = useState<string | null>(null);
     const dragStartTime = useRef<number>(0);
+    const isConnectionDragActiveRef = useRef(false);
+    const connectionStartRef = useRef<CanvasPortEndpoint | null>(null);
+    const connectionStartPoint = useRef<{ x: number; y: number } | null>(null);
     const errorTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const hoveredPortRef = useRef<CanvasPortEndpoint | null>(null);
 
     useEffect(() => () => {
         if (errorTimeout.current) clearTimeout(errorTimeout.current);
@@ -40,11 +51,15 @@ export const useConnectionDragging = () => {
     };
 
     const resetConnectionDrag = () => {
+        isConnectionDragActiveRef.current = false;
+        connectionStartRef.current = null;
         setIsDraggingConnection(false);
         setConnectionStart(null);
         setTempConnectionEnd(null);
         setHoveredNodeId(null);
-        setHoveredSide(null);
+        setHoveredPort(null);
+        connectionStartPoint.current = null;
+        hoveredPortRef.current = null;
     };
 
     // ============================================================================
@@ -53,39 +68,29 @@ export const useConnectionDragging = () => {
 
     /**
      * Checks if mouse is hovering over a node (for connection target)
-     * Also determines which side (left or right connector) is being hovered
      * @param mouseX - Screen X coordinate
      * @param mouseY - Screen Y coordinate
      * @param nodes - Array of all nodes
      * @param viewport - Current viewport
      */
     const checkHoveredNode = (
-        mouseX: number,
-        mouseY: number,
+        point: { x: number; y: number },
         nodes: NodeData[],
-        viewport: Viewport
+        nodeSizes: Record<string, CanvasNodeSize>
     ) => {
-        const canvasX = (mouseX - viewport.x) / viewport.zoom;
-        const canvasY = (mouseY - viewport.y) / viewport.zoom;
-
-        const found = nodes.find(n => {
-            if (n.id === connectionStart?.nodeId) return false;
-            return (
-                canvasX >= n.x && canvasX <= n.x + 340 &&
-                canvasY >= n.y && canvasY <= n.y + 400
-            );
-        });
+        const found = findConnectionTargetNode(
+            nodes,
+            point,
+            connectionStartRef.current?.nodeId,
+            nodeSizes
+        );
 
         if (found) {
             setHoveredNodeId(found.id);
-
-            // Determine which side is being hovered
-            // Left connector is at x position, right connector is at x + 340
-            const nodeCenter = found.x + 170; // Middle of the node
-            setHoveredSide(canvasX < nodeCenter ? 'left' : 'right');
         } else {
+            hoveredPortRef.current = null;
             setHoveredNodeId(null);
-            setHoveredSide(null);
+            setHoveredPort(null);
         }
     };
 
@@ -94,20 +99,39 @@ export const useConnectionDragging = () => {
     // ============================================================================
 
     /**
-     * Starts connection dragging from a connector button
+     * Starts connection dragging from a semantic port.
      */
-    const handleConnectorPointerDown = (
+    const handlePortPointerDown = (
         e: React.PointerEvent,
-        nodeId: string,
-        side: 'left' | 'right'
+        endpoint: CanvasPortEndpoint
     ) => {
         e.stopPropagation();
         e.preventDefault();
         dragStartTime.current = Date.now();
+        isConnectionDragActiveRef.current = true;
+        connectionStartRef.current = endpoint;
+        connectionStartPoint.current = { x: e.clientX, y: e.clientY };
         setConnectionError(null);
         setIsDraggingConnection(true);
-        setConnectionStart({ nodeId, handle: side });
-        setTempConnectionEnd({ x: e.clientX, y: e.clientY });
+        setConnectionStart(endpoint);
+        setHoveredNodeId(null);
+        setHoveredPort(null);
+        hoveredPortRef.current = null;
+        setTempConnectionEnd(null);
+    };
+
+    const handlePortPointerEnter = (endpoint: CanvasPortEndpoint) => {
+        if (!isConnectionDragActiveRef.current || endpoint.nodeId === connectionStartRef.current?.nodeId) return;
+        hoveredPortRef.current = endpoint;
+        setHoveredNodeId(endpoint.nodeId);
+        setHoveredPort(endpoint);
+    };
+
+    const handlePortPointerLeave = (endpoint: CanvasPortEndpoint) => {
+        if (hoveredPortRef.current?.nodeId === endpoint.nodeId && hoveredPortRef.current.portId === endpoint.portId) {
+            hoveredPortRef.current = null;
+            setHoveredPort(null);
+        }
     };
 
     /**
@@ -116,58 +140,71 @@ export const useConnectionDragging = () => {
     const updateConnectionDrag = (
         e: React.PointerEvent,
         nodes: NodeData[],
-        viewport: Viewport
+        viewport: Viewport,
+        canvasRect: { left: number; top: number },
+        nodeSizes: Record<string, CanvasNodeSize>
     ) => {
-        if (!isDraggingConnection) return false;
+        if (!isConnectionDragActiveRef.current) return false;
 
-        setTempConnectionEnd({ x: e.clientX, y: e.clientY });
-        checkHoveredNode(e.clientX, e.clientY, nodes, viewport);
+        const point = screenPointToCanvasPoint(
+            { x: e.clientX, y: e.clientY },
+            canvasRect,
+            viewport
+        );
+        setTempConnectionEnd(point);
+        checkHoveredNode(point, nodes, nodeSizes);
         return true;
     };
 
     /**
-     * Completes connection drag and creates connection if valid
+     * Completes a connection drag and lets the canvas resolve semantic ports.
      * Returns true if connection was handled, false otherwise
-     * @param onConnectionMade - Optional callback called with (parentId, childId) when connection is created
+     * @param onDrop - Callback that resolves the dropped semantic port pair
      */
     const completeConnectionDrag = (
-        onAddNext: (nodeId: string, direction: 'left' | 'right') => void,
-        validateAndAddEdge: (sourceNodeId: string, targetNodeId: string) => ValidateAndAddEdgeResult,
-        onConnectionMade?: (parentId: string, childId: string) => void
+        event: Pick<React.PointerEvent, 'clientX' | 'clientY'>,
+        onAddNext: (nodeId: string, direction: 'left' | 'right', point: { x: number; y: number }) => void,
+        onDrop: (drop: ConnectionDragDrop) => void,
+        nodes: NodeData[],
+        viewport: Viewport,
+        canvasRect: { left: number; top: number },
+        nodeSizes: Record<string, CanvasNodeSize>
     ): boolean => {
-        if (!isDraggingConnection || !connectionStart) return false;
+        const start = connectionStartRef.current;
+        if (!isConnectionDragActiveRef.current || !start) return false;
+
+        // Close the synchronous gate before invoking callbacks so pointer and mouse
+        // completion events cannot create the same Edge twice.
+        isConnectionDragActiveRef.current = false;
 
         const dragDuration = Date.now() - dragStartTime.current;
+        const point = screenPointToCanvasPoint(
+            { x: event.clientX, y: event.clientY },
+            canvasRect,
+            viewport
+        );
+        const targetNodeId = findConnectionTargetNode(nodes, point, start.nodeId, nodeSizes)?.id;
+        const hoveredPort = hoveredPortRef.current?.nodeId === targetNodeId
+            ? hoveredPortRef.current
+            : null;
 
-        // Short click - open menu
-        if (dragDuration < 200 && !hoveredNodeId) {
-            onAddNext(connectionStart.nodeId, connectionStart.handle);
+        const wasClick = connectionStartPoint.current
+            ? isConnectionClick(connectionStartPoint.current, { x: event.clientX, y: event.clientY }, dragDuration)
+            : false;
+
+        if (wasClick) {
+            onAddNext(start.nodeId, start.direction === 'input' ? 'left' : 'right', {
+                x: event.clientX,
+                y: event.clientY
+            });
         }
-        // Drag to node - create connection based on target side
-        else if (hoveredNodeId && hoveredSide) {
-            if (hoveredSide === 'left') {
-                // Connecting to LEFT connector = target receives input (target is child)
-                // source is parent, hoveredNode is child
-                const result = validateAndAddEdge(connectionStart.nodeId, hoveredNodeId);
-                if (!result.valid) {
-                    showConnectionError(result.message || '无法创建连接。');
-                    resetConnectionDrag();
-                    return true;
-                }
-                // Notify about new connection: source is parent, hoveredNode is child
-                onConnectionMade?.(connectionStart.nodeId, hoveredNodeId);
-            } else {
-                // Connecting to RIGHT connector = target provides output (target is parent)
-                // hoveredNode is parent, source is child
-                const result = validateAndAddEdge(hoveredNodeId, connectionStart.nodeId);
-                if (!result.valid) {
-                    showConnectionError(result.message || '无法创建连接。');
-                    resetConnectionDrag();
-                    return true;
-                }
-                // Notify about new connection: hoveredNode is parent, source is child
-                onConnectionMade?.(hoveredNodeId, connectionStart.nodeId);
-            }
+        // Drag to a node or an explicit target port.
+        else if (targetNodeId) {
+            onDrop({
+                start,
+                targetNodeId,
+                ...(hoveredPort ? { targetPort: hoveredPort } : {})
+            });
         }
 
         // Reset state
@@ -206,7 +243,9 @@ export const useConnectionDragging = () => {
         setSelectedEdgeId,
         connectionError,
         reportConnectionError: showConnectionError,
-        handleConnectorPointerDown,
+        handlePortPointerDown,
+        handlePortPointerEnter,
+        handlePortPointerLeave,
         updateConnectionDrag,
         completeConnectionDrag,
         handleEdgeClick,

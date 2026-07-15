@@ -176,16 +176,6 @@ export function resolveConnectionPorts(
       return resolved(sourceNode, 'image-output', targetNode, 'start-frame');
     }
     if (targetType === '视频') {
-      const hasMotionReference = hasInputEdge(existingEdges, targetNode.id, 'motion-reference');
-      if (hasMotionReference) {
-        return resolved(sourceNode, 'image-output', targetNode, 'reference-images');
-      }
-      if (!hasInputEdge(existingEdges, targetNode.id, 'start-frame')) {
-        return resolved(sourceNode, 'image-output', targetNode, 'start-frame');
-      }
-      if (!hasInputEdge(existingEdges, targetNode.id, 'end-frame')) {
-        return resolved(sourceNode, 'image-output', targetNode, 'end-frame');
-      }
       return resolved(sourceNode, 'image-output', targetNode, 'reference-images');
     }
   }

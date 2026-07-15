@@ -165,6 +165,15 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
         );
     }, [showMentionPicker, mentionFilter, state.selectedCharacters]);
 
+    const mentionedCharacters = useMemo(() => {
+        const compactStory = state.story.replace(/\s+/g, '');
+        return state.selectedCharacters.filter(asset => {
+            const exactMention = `@${asset.name}`;
+            const compactMention = `@${asset.name.replace(/\s+/g, '')}`;
+            return state.story.includes(exactMention) || compactStory.includes(compactMention);
+        });
+    }, [state.story, state.selectedCharacters]);
+
     // Handle story change with mention detection
     const handleStoryChange = useCallback((value: string) => {
         // Calculate cursor position for mention detection
@@ -572,6 +581,32 @@ export const StoryboardGeneratorModal: React.FC<StoryboardGeneratorModalProps> =
 
                             {/* Story Textarea with Mention Picker */}
                             <div className="relative">
+                                {mentionedCharacters.length > 0 && (
+                                    <div className="mb-2 rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-2">
+                                        <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-300/80">
+                                            本段已提及
+                                        </div>
+                                        <div className="flex gap-2 overflow-x-auto pb-0.5">
+                                            {mentionedCharacters.map(asset => (
+                                                <div
+                                                    key={asset.id}
+                                                    className="relative flex h-14 min-w-[74px] items-end overflow-hidden rounded-lg border border-white/10 bg-neutral-950"
+                                                    title={`@${asset.name}`}
+                                                >
+                                                    <img
+                                                        src={asset.url}
+                                                        alt={asset.name}
+                                                        className="absolute inset-0 h-full w-full object-cover"
+                                                    />
+                                                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
+                                                    <span className="relative z-10 w-full truncate px-1.5 pb-1 text-[10px] font-semibold text-white">
+                                                        @{asset.name}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                                 <StoryInput
                                     inputRef={textareaRef}
                                     value={state.story}

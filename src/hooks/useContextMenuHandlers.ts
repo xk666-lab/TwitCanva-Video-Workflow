@@ -64,14 +64,31 @@ export const useContextMenuHandlers = ({
     // NODE OPERATIONS
     // ============================================================================
 
-    const handleAddNext = useCallback((nodeId: string, _direction: 'left' | 'right') => {
+    const handleAddNext = useCallback((nodeId: string, _direction: 'left' | 'right', point?: { x: number; y: number }) => {
         const sourceNode = nodes.find(n => n.id === nodeId);
         if (!sourceNode) return;
 
+        const MENU_WIDTH = 410;
+        const MENU_HEIGHT = 560;
+        const GAP = 14;
+        const anchorX = point?.x ?? window.innerWidth / 2;
+        const anchorY = point?.y ?? window.innerHeight / 2;
+        const desiredX = _direction === 'left'
+            ? anchorX - MENU_WIDTH - GAP
+            : anchorX + GAP;
+        const x = Math.min(
+            Math.max(12, desiredX),
+            Math.max(12, window.innerWidth - MENU_WIDTH - 12)
+        );
+        const y = Math.min(
+            Math.max(12, anchorY - 28),
+            Math.max(12, window.innerHeight - MENU_HEIGHT - 12)
+        );
+
         setContextMenu({
             isOpen: true,
-            x: window.innerWidth / 2,
-            y: window.innerHeight / 2,
+            x,
+            y,
             type: 'node-connector',
             sourceNodeId: nodeId,
             connectorSide: _direction

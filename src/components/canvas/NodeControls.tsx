@@ -35,6 +35,8 @@ const IMAGE_RATIOS = [
     "Auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9"
 ];
 
+const IMAGE_COUNTS = [1, 2, 4] as const;
+
 const VIDEO_RESOLUTIONS = [
     "Auto", "1080p", "768p", "720p", "512p"
 ];
@@ -186,6 +188,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     const [showAspectRatioDropdown, setShowAspectRatioDropdown] = useState(false);
     const [showDurationDropdown, setShowDurationDropdown] = useState(false);
     const [showResolutionDropdown, setShowResolutionDropdown] = useState(false);
+    const [showImageCountDropdown, setShowImageCountDropdown] = useState(false);
     const [showModelDropdown, setShowModelDropdown] = useState(false);
     const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
     const [localPrompt, setLocalPrompt] = useState(data.prompt || '');
@@ -193,6 +196,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     const aspectRatioDropdownRef = useRef<HTMLDivElement>(null);
     const durationDropdownRef = useRef<HTMLDivElement>(null);
     const resolutionDropdownRef = useRef<HTMLDivElement>(null);
+    const imageCountDropdownRef = useRef<HTMLDivElement>(null);
     const modelDropdownRef = useRef<HTMLDivElement>(null);
     const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastSentPromptRef = useRef<string | undefined>(data.prompt); // Track what we sent
@@ -268,6 +272,9 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
             if (resolutionDropdownRef.current && !resolutionDropdownRef.current.contains(event.target as Node)) {
                 setShowResolutionDropdown(false);
             }
+            if (imageCountDropdownRef.current && !imageCountDropdownRef.current.contains(event.target as Node)) {
+                setShowImageCountDropdown(false);
+            }
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -292,13 +299,11 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
 
     // Auto-open Advanced Settings when:
     // 1. Seedance has reference images
-    // 2. 2+ images are connected to a video node (frame-to-frame)
-    // 3. Kling 2.6 with an input image (has audio toggle)
+    // 2. Kling 2.6 with an input image (has audio toggle)
     useEffect(() => {
         if (data.type === NodeType.VIDEO) {
             const isSeedanceModel = isSeedanceVideoModelId(data.videoModel);
             const shouldAutoExpand = (isSeedanceModel && connectedImageNodes.length > 0) ||
-                connectedImageNodes.length >= 2 ||
                 (data.videoModel === 'kling-v2-6' && connectedImageNodes.length > 0);
             if (shouldAutoExpand) {
                 setShowAdvanced(true);
@@ -332,6 +337,11 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     const handleAspectRatioSelect = (value: string) => {
         onUpdate(data.id, { aspectRatio: value });
         setShowAspectRatioDropdown(false);
+    };
+
+    const handleImageCountSelect = (value: 1 | 2 | 4) => {
+        onUpdate(data.id, { imageCount: value });
+        setShowImageCountDropdown(false);
     };
 
     const handleVideoModeChange = (mode: 'standard' | 'frame-to-frame') => {
@@ -377,6 +387,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     const isVideoNode = data.type === NodeType.VIDEO || data.type === NodeType.LOCAL_VIDEO_MODEL;
     const isImageNode = data.type === NodeType.IMAGE || data.type === NodeType.LOCAL_IMAGE_MODEL;
     const hasConnectedImages = connectedImageNodes.length > 0;
+    const currentImageCount = data.imageCount || 1;
 
     // Video model selection logic
     const currentVideoModel = VIDEO_MODELS.find(m => m.id === data.videoModel)
@@ -395,7 +406,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
 
     const videoGenerationMode = hasVideoParent ? 'motion-control'
         : (isSeedanceVideoModel && imageInputCount > 0) ? 'reference-to-video'
-        : (isFrameToFrame || imageInputCount >= 2) ? 'frame-to-frame'
+        : isFrameToFrame ? 'frame-to-frame'
             : (inputUrl || imageInputCount > 0) ? 'image-to-video'
                 : 'text-to-video';
 
@@ -593,6 +604,12 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
 
     // Theme helper
     const isDark = canvasTheme === 'dark';
+    const promptReferenceChips = connectedImageNodes
+        .filter(node => Boolean(node.url))
+        .map((node, index) => ({
+            ...node,
+            label: `${node.type === NodeType.VIDEO ? '@视频' : '@图片'}${index + 1}`
+        }));
 
     // Handle angle mode generate - creates a new connected node
     const handleAngleGenerate = () => {
@@ -640,6 +657,33 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
             {/* Prompt Textarea with Expand Button - Hidden for storyboard-generated scenes */}
             {!(data.prompt && data.prompt.startsWith('Extract panel #')) && (
                 <div className="mb-3">
+                    {promptReferenceChips.length > 0 && (
+                        <div className={`mb-2 rounded-xl border p-2 ${isDark ? 'border-cyan-400/15 bg-cyan-400/[0.04]' : 'border-cyan-200 bg-cyan-50'}`}>
+                            <div className={`mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] ${isDark ? 'text-cyan-200/75' : 'text-cyan-700'}`}>
+                                <ImageIcon size={11} />
+                                <span>已引用素材</span>
+                            </div>
+                            <div className="flex gap-2 overflow-x-auto pb-0.5">
+                                {promptReferenceChips.map(item => (
+                                    <div
+                                        key={item.id}
+                                        className={`group/reference relative flex h-14 min-w-[68px] items-end overflow-hidden rounded-lg border ${isDark ? 'border-white/10 bg-neutral-950' : 'border-white bg-white shadow-sm'}`}
+                                        title={item.label}
+                                    >
+                                        <img
+                                            src={item.url}
+                                            alt={item.label}
+                                            className="absolute inset-0 h-full w-full object-cover transition-transform duration-200 group-hover/reference:scale-105"
+                                        />
+                                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
+                                        <span className="relative z-10 w-full truncate px-1.5 pb-1 text-[10px] font-semibold text-white">
+                                            {item.label}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                     <textarea
                         className={`w-full bg-transparent text-sm outline-none resize-none font-light ${isDark ? 'text-white placeholder-neutral-600' : 'text-neutral-900 placeholder-neutral-400'}`}
                         placeholder={
@@ -1078,6 +1122,40 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                             </div>
                         )}
 
+                        {isImageNode && (
+                            <div className="relative" ref={imageCountDropdownRef}>
+                                <button
+                                    onClick={() => setShowImageCountDropdown(!showImageCountDropdown)}
+                                    className="flex items-center gap-1.5 text-xs font-medium bg-[#252525] hover:bg-[#333] border border-neutral-700 text-white px-2.5 py-1.5 rounded-lg transition-colors"
+                                    title="生成数量"
+                                >
+                                    <ImageIcon size={12} className="text-cyan-400" />
+                                    {currentImageCount}张
+                                </button>
+
+                                {showImageCountDropdown && (
+                                    <div
+                                        className="absolute bottom-full mb-2 right-0 w-24 bg-[#252525] border border-neutral-700 rounded-lg shadow-xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-100"
+                                        onWheel={(e) => e.stopPropagation()}
+                                    >
+                                        <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f]">
+                                            数量
+                                        </div>
+                                        {IMAGE_COUNTS.map(count => (
+                                            <button
+                                                key={count}
+                                                onClick={() => handleImageCountSelect(count)}
+                                                className={`flex items-center justify-between w-full px-3 py-2 text-xs text-left hover:bg-[#333] transition-colors ${currentImageCount === count ? 'text-blue-400' : 'text-neutral-300'}`}
+                                            >
+                                                <span>{count}张</span>
+                                                {currentImageCount === count && <Check size={12} />}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         {/* Video Aspect Ratio Dropdown - Only for video nodes (hidden in motion-control mode) */}
                         {isVideoNode && videoGenerationMode !== 'motion-control' && (
                             <div className="relative" ref={aspectRatioDropdownRef}>
@@ -1455,7 +1533,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                 )}
 
                                 {/* Frame Inputs - Show when 2+ nodes are connected */}
-                                {!isSeedanceVideoModel && connectedImageNodes.length >= 2 && (
+                                {!isSeedanceVideoModel && isFrameToFrame && connectedImageNodes.length >= 2 && (
                                     <div className="space-y-2">
                                         <label className="text-[10px] text-neutral-500 uppercase tracking-wider">
                                             {videoGenerationMode === 'motion-control' ? 'Input References' : 'Connected Frames'}

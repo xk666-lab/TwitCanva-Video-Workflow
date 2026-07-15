@@ -2,12 +2,14 @@
  * CanvasNode.tsx
  * 
  * Main canvas node component.
- * Orchestrates NodeContent, NodeControls, and NodeConnectors sub-components.
+ * Orchestrates NodeContent, NodeControls, and semantic port rails.
  */
 
 import React from 'react';
 import { NodeData, NodeStatus, NodeType } from '../../types';
-import { NodeConnectors } from './NodeConnectors';
+import type { CanvasPortEndpoint, ConnectionPortFeedback } from '../../domain/graph/semanticCanvas.ts';
+import type { CanvasNodeSize } from '../../utils/connectionHitTesting.ts';
+import { NodePortRail } from './NodePortRail';
 import { NodeContent } from './NodeContent';
 import { NodeControls } from './NodeControls';
 import { ChangeAnglePanel } from './ChangeAnglePanel';
@@ -15,7 +17,7 @@ import { ChangeAnglePanel } from './ChangeAnglePanel';
 interface CanvasNodeProps {
   data: NodeData;
   inputUrl?: string;
-  connectedImageNodes?: { id: string; url: string; type?: NodeType }[]; // For frame-to-frame video mode and motion control
+  connectedImageNodes?: { id: string; url: string; type?: NodeType }[]; // Connected visual references
   onUpdate: (id: string, updates: Partial<NodeData>) => void;
   onGenerate: (id: string) => void;
   onCancelGeneration?: (id: string) => void;
@@ -24,14 +26,17 @@ interface CanvasNodeProps {
   onCancelStoryTask?: (nodeId: string) => void;
   onRetryStoryTask?: (nodeId: string) => void;
   onAddStoryboardToTimeline?: (nodeId: string) => { valid: boolean; message?: string };
-  onAddNext: (id: string, type: 'left' | 'right') => void;
   selected: boolean;
   showControls?: boolean; // Only show controls when single node is selected (not in group selection)
   onSelect: (id: string) => void;
   onNodePointerDown: (e: React.PointerEvent, id: string) => void;
   onContextMenu: (e: React.MouseEvent, id: string) => void;
-  onConnectorDown: (e: React.PointerEvent, id: string, side: 'left' | 'right') => void;
-  isHoveredForConnection?: boolean;
+  isConnectionActive?: boolean;
+  portFeedbackByKey?: ReadonlyMap<string, ConnectionPortFeedback>;
+  onPortPointerDown: (event: React.PointerEvent, endpoint: CanvasPortEndpoint) => void;
+  onPortPointerEnter?: (endpoint: CanvasPortEndpoint) => void;
+  onPortPointerLeave?: (endpoint: CanvasPortEndpoint) => void;
+  onBoundsChange?: (nodeId: string, size: CanvasNodeSize) => void;
   onOpenEditor?: (nodeId: string) => void;
   onUpload?: (nodeId: string, imageDataUrl: string) => void;
   onAudioUpload?: (nodeId: string, audioDataUrl: string, fileName?: string) => void | Promise<void>;
@@ -70,14 +75,17 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
   onCancelStoryTask,
   onRetryStoryTask,
   onAddStoryboardToTimeline,
-  onAddNext,
   selected,
   showControls = true, // Default to true for backward compatibility
   onSelect,
   onNodePointerDown,
   onContextMenu,
-  onConnectorDown,
-  isHoveredForConnection,
+  isConnectionActive,
+  portFeedbackByKey,
+  onPortPointerDown,
+  onPortPointerEnter,
+  onPortPointerLeave,
+  onBoundsChange,
   onOpenEditor,
   onUpload,
   onAudioUpload,
@@ -106,6 +114,25 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
   const [editedTitle, setEditedTitle] = React.useState(data.title || data.type);
   const titleInputRef = React.useRef<HTMLInputElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const nodeRootRef = React.useRef<HTMLDivElement>(null);
+
+  React.useLayoutEffect(() => {
+    const element = nodeRootRef.current;
+    if (!element || !onBoundsChange) return;
+
+    const reportBounds = () => {
+      const width = element.offsetWidth;
+      const height = element.offsetHeight;
+      if (width > 0 && height > 0) onBoundsChange(data.id, { width, height });
+    };
+
+    reportBounds();
+    if (typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(reportBounds);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [data.id, onBoundsChange]);
 
   const isIdle = data.status === NodeStatus.IDLE || data.status === NodeStatus.ERROR;
   const isLoading = data.status === NodeStatus.LOADING;
@@ -215,6 +242,7 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
   if (data.type === NodeType.IMAGE_EDITOR) {
     return (
       <div
+        ref={nodeRootRef}
         className={`absolute flex items-center group/node touch-none pointer-events-auto`}
         style={{
           transform: `translate(${data.x}px, ${data.y}px)`,
@@ -224,7 +252,16 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
         onPointerDown={(e) => onNodePointerDown(e, data.id)}
         onContextMenu={(e) => onContextMenu(e, data.id)}
       >
-        <NodeConnectors nodeId={data.id} onConnectorDown={onConnectorDown} canvasTheme={canvasTheme} />
+        <NodePortRail
+          node={data}
+          selected={selected}
+          isConnectionActive={isConnectionActive}
+          portFeedbackByKey={portFeedbackByKey}
+          canvasTheme={canvasTheme}
+          onPortPointerDown={onPortPointerDown}
+          onPortPointerEnter={onPortPointerEnter}
+          onPortPointerLeave={onPortPointerLeave}
+        />
 
         {/* Image Editor Node Card */}
         <div
@@ -275,6 +312,7 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
   if (data.type === NodeType.CAMERA_ANGLE) {
     return (
       <div
+        ref={nodeRootRef}
         className={`absolute flex items-center group/node touch-none pointer-events-auto`}
         style={{
           transform: `translate(${data.x}px, ${data.y}px)`,
@@ -284,7 +322,16 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
         onPointerDown={(e) => onNodePointerDown(e, data.id)}
         onContextMenu={(e) => onContextMenu(e, data.id)}
       >
-        <NodeConnectors nodeId={data.id} onConnectorDown={onConnectorDown} canvasTheme={canvasTheme} />
+        <NodePortRail
+          node={data}
+          selected={selected}
+          isConnectionActive={isConnectionActive}
+          portFeedbackByKey={portFeedbackByKey}
+          canvasTheme={canvasTheme}
+          onPortPointerDown={onPortPointerDown}
+          onPortPointerEnter={onPortPointerEnter}
+          onPortPointerLeave={onPortPointerLeave}
+        />
 
         {/* Relative wrapper for the Card */}
         <div className="relative group/nodecard">
@@ -492,6 +539,7 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
 
     return (
       <div
+        ref={nodeRootRef}
         className={`absolute flex items-center group/node touch-none pointer-events-auto`}
         style={{
           transform: `translate(${data.x}px, ${data.y}px)`,
@@ -501,7 +549,16 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
         onPointerDown={(e) => onNodePointerDown(e, data.id)}
         onContextMenu={(e) => onContextMenu(e, data.id)}
       >
-        <NodeConnectors nodeId={data.id} onConnectorDown={onConnectorDown} canvasTheme={canvasTheme} />
+        <NodePortRail
+          node={data}
+          selected={selected}
+          isConnectionActive={isConnectionActive}
+          portFeedbackByKey={portFeedbackByKey}
+          canvasTheme={canvasTheme}
+          onPortPointerDown={onPortPointerDown}
+          onPortPointerEnter={onPortPointerEnter}
+          onPortPointerLeave={onPortPointerLeave}
+        />
 
         {/* Video Editor Node Card */}
         <div
@@ -562,6 +619,7 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
 
   return (
     <div
+      ref={nodeRootRef}
       className={`absolute group/node touch-none pointer-events-auto`}
       style={{
         transform: `translate(${data.x}px, ${data.y}px)`,
@@ -574,7 +632,16 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
-      <NodeConnectors nodeId={data.id} onConnectorDown={onConnectorDown} canvasTheme={canvasTheme} />
+      <NodePortRail
+        node={data}
+        selected={selected}
+        isConnectionActive={isConnectionActive}
+        portFeedbackByKey={portFeedbackByKey}
+        canvasTheme={canvasTheme}
+        onPortPointerDown={onPortPointerDown}
+        onPortPointerEnter={onPortPointerEnter}
+        onPortPointerLeave={onPortPointerLeave}
+      />
 
       {/* Relative wrapper for the Image Card to allow absolute positioning of controls below it */}
       <div className="relative group/nodecard">

@@ -8,6 +8,7 @@ export interface MediaGenerationTaskOutput {
   kind?: 'media';
   resultUrl: string;
   take?: MediaTake;
+  takes?: MediaTake[];
 }
 
 export interface StoryPackageGenerationTaskOutput {

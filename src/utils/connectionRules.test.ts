@@ -111,25 +111,25 @@ test('IMAGE cannot connect to STORYBOARD', () => {
   );
 });
 
-test('first IMAGE to VIDEO connection resolves to start-frame', () => {
+test('IMAGE to VIDEO resolves to reference-images by default', () => {
   const resolution = resolveConnectionPorts(node('image', '图片'), node('video', '视频'), []);
 
   assert.equal(resolution.valid, true);
   if (resolution.valid) {
     assert.equal(resolution.sourcePort.id, 'image-output');
-    assert.equal(resolution.targetPort.id, 'start-frame');
+    assert.equal(resolution.targetPort.id, 'reference-images');
   }
 });
 
-test('subsequent IMAGE inputs fill end-frame and then ordered references', () => {
+test('subsequent IMAGE to VIDEO inputs remain ordered references', () => {
   const target = node('video', '视频');
-  const startEdge = edge({ sourceNodeId: 'first', targetNodeId: 'video' });
+  const startEdge = edge({ sourceNodeId: 'first', targetNodeId: 'video', targetPortId: 'reference-images' });
   const endResolution = resolveConnectionPorts(node('second', '图片'), target, [startEdge]);
-  assert.equal(endResolution.valid && endResolution.targetPort.id, 'end-frame');
+  assert.equal(endResolution.valid && endResolution.targetPort.id, 'reference-images');
 
   const referenceResolution = resolveConnectionPorts(node('third', '图片'), target, [
     startEdge,
-    edge({ id: 'end', sourceNodeId: 'second', targetNodeId: 'video', targetPortId: 'end-frame' })
+    edge({ id: 'second-reference', sourceNodeId: 'second', targetNodeId: 'video', targetPortId: 'reference-images' })
   ]);
   assert.equal(referenceResolution.valid && referenceResolution.targetPort.id, 'reference-images');
 });

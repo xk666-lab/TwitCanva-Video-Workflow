@@ -60,6 +60,7 @@ export interface NodeData {
   errorMessage?: string;
   activeTaskId?: string; // Persisted task currently allowed to update this node
   lastTaskId?: string; // Most recent terminal task, used for linked retry
+  generationProgress?: number; // 0-100 task progress for canvas feedback
   scriptData?: ScriptDocument;
   storyboardData?: StoryboardDocument;
 
@@ -82,6 +83,7 @@ export interface NodeData {
   // Settings
   model: string;
   imageModel?: string; // Image model version (e.g., 'gemini-pro', 'kling-v2')
+  imageCount?: 1 | 2 | 4; // Requested number of image results for future batch generation
   aspectRatio: string;
   resolution: string;
   isPromptExpanded?: boolean; // Whether the prompt editing area is expanded

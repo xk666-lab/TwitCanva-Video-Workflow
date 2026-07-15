@@ -6,6 +6,14 @@
  */
 
 import React, { useState } from 'react';
+import {
+    BookOpenText,
+    HardDrive,
+    Image as ImageIcon,
+    PanelsTopLeft,
+    Type,
+    Video
+} from 'lucide-react';
 import { NodeData, NodeGroup, NodeType } from '../../types';
 
 interface SelectionBoundingBoxProps {
@@ -18,6 +26,7 @@ interface SelectionBoundingBoxProps {
     onRenameGroup?: (groupId: string, newLabel: string) => void;
     onSortNodes?: (direction: 'horizontal' | 'vertical' | 'grid') => void;
     onCreateVideo?: () => void;
+    onCreateConnectedNode?: (type: NodeType) => void;
     onEditStoryboard?: (groupId: string) => void;
     onSaveTemplate?: (nodeIds: string[], group?: NodeGroup) => void;
 }
@@ -148,6 +157,7 @@ export const SelectionBoundingBox: React.FC<SelectionBoundingBoxProps> = ({
     onRenameGroup,
     onSortNodes,
     onCreateVideo,
+    onCreateConnectedNode,
     onEditStoryboard,
     onSaveTemplate
 }) => {
@@ -158,6 +168,7 @@ export const SelectionBoundingBox: React.FC<SelectionBoundingBoxProps> = ({
     const [isEditingLabel, setIsEditingLabel] = useState(false);
     const [editedLabel, setEditedLabel] = useState('');
     const [showSortDropdown, setShowSortDropdown] = useState(false);
+    const [showCreateMenu, setShowCreateMenu] = useState(false);
     // ============================================================================
     // CALCULATIONS
     // ============================================================================
@@ -288,6 +299,101 @@ export const SelectionBoundingBox: React.FC<SelectionBoundingBoxProps> = ({
                 )
             )}
 
+            {isGrouped && onCreateConnectedNode && (
+                <div
+                    className="absolute pointer-events-auto"
+                    style={{
+                        top: '50%',
+                        right: -18,
+                        transform: `translateY(-50%) scale(${uiScale})`,
+                        transformOrigin: 'center left'
+                    }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                >
+                    <button
+                        type="button"
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            setShowCreateMenu(value => !value);
+                        }}
+                        className="flex h-9 w-9 items-center justify-center rounded-full border border-white/35 bg-neutral-950/90 text-white shadow-[0_8px_30px_rgba(0,0,0,0.35)] backdrop-blur-md transition-colors hover:border-cyan-300 hover:bg-cyan-400/20"
+                        title="引用该组生成"
+                        aria-label="引用该组生成"
+                    >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M12 5v14" />
+                            <path d="M5 12h14" />
+                        </svg>
+                    </button>
+
+                    {showCreateMenu && (
+                        <div className="absolute left-12 top-1/2 z-[80] w-[410px] max-w-[calc(100vw-24px)] -translate-y-1/2 overflow-hidden rounded-2xl border border-white/10 bg-[#1f1f1f]/95 text-white shadow-2xl backdrop-blur-xl">
+                            <div className="border-b border-white/10 px-6 py-4 text-lg font-medium text-neutral-400">
+                                基于此节点继续生成
+                            </div>
+                            <div className="max-h-[560px] overflow-y-auto px-6 py-4">
+                                {[
+                                    { type: NodeType.TEXT, label: '文本生成', hint: '脚本、文案、品牌文本', icon: <Type size={26} /> },
+                                    { type: NodeType.SCRIPT, label: '脚本', hint: '持久化故事与视觉设定', icon: <BookOpenText size={26} /> },
+                                    { type: NodeType.STORYBOARD, label: '分镜管理器', hint: '管理结构化镜头与生成结果', icon: <PanelsTopLeft size={26} /> },
+                                    { type: NodeType.IMAGE, label: '图片生成', hint: undefined, icon: <ImageIcon size={26} /> },
+                                    { type: NodeType.VIDEO, label: '视频生成', hint: undefined, icon: <Video size={26} /> }
+                                ].map(item => (
+                                    <button
+                                        key={item.type}
+                                        type="button"
+                                        onClick={(event) => {
+                                            event.stopPropagation();
+                                            setShowCreateMenu(false);
+                                            onCreateConnectedNode(item.type);
+                                        }}
+                                        className="group flex w-full items-center gap-5 rounded-xl px-0 py-3 text-left transition-colors hover:bg-white/[0.04]"
+                                    >
+                                        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#151515] text-neutral-200 transition-colors group-hover:bg-[#2d2d2d] group-hover:text-white">
+                                            {item.icon}
+                                        </span>
+                                        <span className="min-w-0">
+                                            <span className="block text-xl font-semibold text-neutral-100">{item.label}</span>
+                                            {item.hint && (
+                                                <span className="mt-0.5 block truncate text-base text-neutral-500">{item.hint}</span>
+                                            )}
+                                        </span>
+                                    </button>
+                                ))}
+
+                                <div className="my-4 border-t border-white/10" />
+                                <div className="mb-3 text-base text-neutral-500">本地模型（开源）</div>
+
+                                {[
+                                    { type: NodeType.LOCAL_IMAGE_MODEL, label: '本地图片模型', hint: '使用已下载的开源模型' },
+                                    { type: NodeType.LOCAL_VIDEO_MODEL, label: '本地视频模型', hint: '支持 AnimateDiff、SVD 等' }
+                                ].map(item => (
+                                    <button
+                                        key={item.type}
+                                        type="button"
+                                        onClick={(event) => {
+                                            event.stopPropagation();
+                                            setShowCreateMenu(false);
+                                            onCreateConnectedNode(item.type);
+                                        }}
+                                        className="group flex w-full items-center gap-5 rounded-xl px-0 py-3 text-left transition-colors hover:bg-white/[0.04]"
+                                    >
+                                        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#151515] text-neutral-200 transition-colors group-hover:bg-[#2d2d2d] group-hover:text-white">
+                                            <HardDrive size={26} />
+                                        </span>
+                                        <span className="min-w-0 flex-1">
+                                            <span className="block text-xl font-semibold text-neutral-100">{item.label}</span>
+                                            <span className="mt-0.5 block truncate text-base text-neutral-500">{item.hint}</span>
+                                        </span>
+                                        <span className="rounded-md border border-white/15 bg-white/5 px-2 py-1 text-xs text-neutral-300">新</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* Group Button (when multiple nodes selected but not grouped) */}
             {showGroupButton && (
                 <div
@@ -331,7 +437,7 @@ export const SelectionBoundingBox: React.FC<SelectionBoundingBoxProps> = ({
             )}
 
             {/* Group Toolbar (when grouped) */}
-            {isGrouped && (
+            {false && isGrouped && (
                 <div
                     className="absolute flex gap-2 pointer-events-auto"
                     style={{

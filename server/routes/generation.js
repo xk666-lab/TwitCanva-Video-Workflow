@@ -83,32 +83,48 @@ function findLatestTakeForNode(nodeId, dirs) {
     return matches[0] || null;
 }
 
-function findTakeForGenerationTask(taskId, dirs) {
+function findTakesForGenerationTask(taskId, dirs) {
+    const matches = [];
     for (const { dir, mediaType, urlType } of dirs) {
         if (!fs.existsSync(dir)) continue;
         for (const file of fs.readdirSync(dir)) {
             if (!file.endsWith('.json')) continue;
             const meta = readJsonFile(path.join(dir, file));
             if (!meta || meta.generationTaskId !== taskId) continue;
-            return {
+            matches.push({
                 meta,
                 url: `/library/${urlType}/${meta.filename}`,
-                type: mediaType
-            };
+                type: mediaType,
+                createdAt: new Date(meta.createdAt || 0).getTime()
+            });
         }
     }
-    return null;
+    matches.sort((left, right) => {
+        const leftBatch = Number(left.meta?.metadata?.batchIndex);
+        const rightBatch = Number(right.meta?.metadata?.batchIndex);
+        if (Number.isFinite(leftBatch) && Number.isFinite(rightBatch) && leftBatch !== rightBatch) {
+            return leftBatch - rightBatch;
+        }
+        return left.createdAt - right.createdAt;
+    });
+    return matches;
 }
 
 export function recoverGenerationTaskOutput(task, locals) {
-    const recovered = findTakeForGenerationTask(task.taskId, [
+    const recoveredTakes = findTakesForGenerationTask(task.taskId, [
         { dir: locals.IMAGES_DIR, mediaType: 'image', urlType: 'images' },
         { dir: locals.VIDEOS_DIR, mediaType: 'video', urlType: 'videos' }
     ]);
-    if (!recovered) return null;
+    if (recoveredTakes.length === 0) return null;
+    const takes = recoveredTakes
+        .map(item => metadataToTake(item.meta, item.url, item.type))
+        .filter(Boolean)
+        .map((take, index) => ({ ...take, isHero: index === 0 }));
+    const hero = takes[0];
     return {
-        resultUrl: recovered.url,
-        take: metadataToTake(recovered.meta, recovered.url, recovered.type)
+        resultUrl: hero.url,
+        take: hero,
+        takes
     };
 }
 
@@ -208,6 +224,7 @@ function pickTaskParameters(inputSnapshot) {
         'resolution',
         'duration',
         'imageModel',
+        'imageCount',
         'videoModel',
         'generateAudio',
         'klingReferenceMode',
@@ -424,15 +441,31 @@ router.post('/generate-video', (req, res) => runLegacyGeneration(req, res, 'gene
 // ============================================================================
 
 async function executeImageGeneration(inputSnapshot, locals) {
-        const { nodeId, generationTaskId, prompt, aspectRatio, resolution, imageBase64: rawImageBase64, imageModel: requestedImageModel, klingReferenceMode, klingFaceIntensity, klingSubjectIntensity, imageEdit } = inputSnapshot;
-        const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_IMAGE_MODEL, IMAGES_DIR } = locals;
+        const { nodeId, generationTaskId, prompt, aspectRatio, resolution, imageBase64: rawImageBase64, imageModel: requestedImageModel, imageCount: requestedImageCount, klingReferenceMode, klingFaceIntensity, klingSubjectIntensity, imageEdit } = inputSnapshot;
+        const {
+            GEMINI_API_KEY,
+            KLING_ACCESS_KEY,
+            KLING_SECRET_KEY,
+            OPENAI_API_KEY,
+            OPENAI_BASE_URL,
+            OPENAI_IMAGE_API_KEY,
+            OPENAI_IMAGE_BASE_URL,
+            OPENAI_IMAGE_MODEL,
+            IMAGES_DIR
+        } = locals;
+        const openaiImageApiKey = OPENAI_IMAGE_API_KEY || OPENAI_API_KEY;
+        const openaiImageBaseURL = OPENAI_IMAGE_BASE_URL || OPENAI_BASE_URL;
         const selectedImageModel = requestedImageModel || OPENAI_IMAGE_MODEL || 'gpt-image-2';
         const imageModel = selectedImageModel === 'gpt-image-1.5' ? 'gpt-image-2' : selectedImageModel;
+        const outputCount = imageEdit
+            ? 1
+            : Math.min(4, Math.max(1, Number(requestedImageCount) || 1));
 
         // Determine provider
         const isKlingModel = imageModel && imageModel.startsWith('kling-');
         const isOpenAIModel = imageModel && imageModel.startsWith('gpt-image-');
 
+        const generateOneImage = async () => {
         let imageBuffer;
         let imageFormat = 'png';
 
@@ -512,8 +545,8 @@ async function executeImageGeneration(inputSnapshot, locals) {
 
         } else if (isOpenAIModel) {
             // --- OPENAI GPT IMAGE GENERATION ---
-            if (!OPENAI_API_KEY) {
-                throw new Error('OpenAI API key not configured. Add OPENAI_API_KEY to .env');
+            if (!openaiImageApiKey) {
+                throw new Error('OpenAI API key not configured. Add OPENAI_IMAGE_API_KEY or OPENAI_API_KEY to .env');
             }
 
             console.log(`Using OpenAI GPT Image model: ${imageModel}`);
@@ -530,8 +563,8 @@ async function executeImageGeneration(inputSnapshot, locals) {
                 imageBase64Array,
                 aspectRatio,
                 resolution,
-                apiKey: OPENAI_API_KEY,
-                baseURL: OPENAI_BASE_URL,
+                apiKey: openaiImageApiKey,
+                baseURL: openaiImageBaseURL,
                 model: imageModel
             });
 
@@ -556,10 +589,9 @@ async function executeImageGeneration(inputSnapshot, locals) {
             });
         }
 
-        // Save to library - use unique filename to preserve previous generations
-        const saved = saveBufferToFile(imageBuffer, IMAGES_DIR, 'img', imageFormat);
+        return { imageBuffer, imageFormat };
+        };
 
-        const createdAt = new Date().toISOString();
         const imageEditMetadata = imageEdit ? {
             operation: 'edit-image',
             mode: imageEdit.mode,
@@ -572,38 +604,56 @@ async function executeImageGeneration(inputSnapshot, locals) {
                 ? { sourceUrl: rawImageBase64 }
                 : {})
         } : {};
-        const take = createMediaTake({
-            nodeId: nodeId || saved.id,
-            type: 'image',
-            url: saved.url,
-            prompt,
-            model: imageModel || 'gemini-pro',
-            createdAt,
-            metadata: {
+        const takes = [];
+
+        for (let index = 0; index < outputCount; index += 1) {
+            const { imageBuffer, imageFormat } = await generateOneImage();
+            // Save to library - use unique filename to preserve previous generations.
+            const saved = saveBufferToFile(imageBuffer, IMAGES_DIR, 'img', imageFormat);
+            const createdAt = new Date().toISOString();
+            const take = createMediaTake({
+                nodeId: nodeId || saved.id,
+                type: 'image',
+                url: saved.url,
+                prompt,
+                model: imageModel || 'gemini-pro',
+                createdAt,
+                metadata: {
+                    filename: saved.filename,
+                    format: imageFormat,
+                    generationTaskId,
+                    batchIndex: index,
+                    batchCount: outputCount,
+                    ...imageEditMetadata
+                }
+            });
+            take.isHero = index === 0;
+
+            const metadata = {
+                id: take.id,
+                takeId: take.id,
+                nodeId: nodeId || saved.id,
                 filename: saved.filename,
-                format: imageFormat,
+                prompt: prompt,
+                model: imageModel || 'gemini-pro',
+                createdAt,
+                type: 'images',
+                mediaType: 'image',
                 generationTaskId,
-                ...imageEditMetadata
-            }
-        });
+                metadata: take.metadata
+            };
+            fs.writeFileSync(path.join(IMAGES_DIR, `${take.id}.json`), JSON.stringify(metadata, null, 2));
 
-        const metadata = {
-            id: take.id,
-            takeId: take.id,
-            nodeId: nodeId || saved.id,
-            filename: saved.filename,
-            prompt: prompt,
-            model: imageModel || 'gemini-pro',
-            createdAt,
-            type: 'images',
-            mediaType: 'image',
-            generationTaskId,
-            metadata: take.metadata
+            console.log(`Image saved: ${saved.url} (model: ${imageModel || 'gemini-pro'}, ${index + 1}/${outputCount})`);
+            takes.push(take);
+        }
+
+        const heroTake = takes[0];
+        return {
+            resultUrl: heroTake.url,
+            take: heroTake,
+            takes
         };
-        fs.writeFileSync(path.join(IMAGES_DIR, `${take.id}.json`), JSON.stringify(metadata, null, 2));
-
-        console.log(`Image saved: ${saved.url} (model: ${imageModel || 'gemini-pro'})`);
-        return { resultUrl: saved.url, take };
 }
 
 // ============================================================================
@@ -897,6 +947,7 @@ router.get('/generation-status/:nodeId', async (req, res) => {
                     type: latestTask.output.take?.type || (latestTask.operation === 'generate-video' ? 'video' : 'image'),
                     createdAt: latestTask.completedAt || latestTask.updatedAt,
                     take: latestTask.output.take,
+                    takes: latestTask.output.takes,
                     task: latestTask
                 });
             }

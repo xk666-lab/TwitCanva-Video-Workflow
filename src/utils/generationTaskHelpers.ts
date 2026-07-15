@@ -5,6 +5,11 @@ import type {
 import type { NodeData } from '../types.ts';
 import { buildGenerationSuccessUpdate } from './takeHelpers.ts';
 
+function normalizeTaskProgress(progress: unknown): number | undefined {
+  if (typeof progress !== 'number' || !Number.isFinite(progress)) return undefined;
+  return Math.max(0, Math.min(100, Math.round(progress)));
+}
+
 function isMediaGenerationTaskOutput(
   output: unknown
 ): output is MediaGenerationTaskOutput {
@@ -32,7 +37,8 @@ export function buildGenerationTaskNodeUpdate(
     return {
       ...buildGenerationSuccessUpdate(node, task.output),
       activeTaskId: undefined,
-      lastTaskId: task.taskId
+      lastTaskId: task.taskId,
+      generationProgress: undefined
     };
   }
 
@@ -44,6 +50,7 @@ export function buildGenerationTaskNodeUpdate(
         : 'Generation failed.'),
       activeTaskId: undefined,
       lastTaskId: task.taskId,
+      generationProgress: undefined,
       generationStartTime: undefined
     };
   }
@@ -51,6 +58,7 @@ export function buildGenerationTaskNodeUpdate(
   return {
     status: 'loading' as NodeData['status'],
     activeTaskId: task.taskId,
+    generationProgress: normalizeTaskProgress(task.progress),
     errorMessage: undefined
   };
 }

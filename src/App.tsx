@@ -10,12 +10,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Toolbar } from './components/Toolbar';
 import { TopBar } from './components/TopBar';
 import { CanvasNode } from './components/canvas/CanvasNode';
+import { NodeCommandPalette } from './components/canvas/NodeCommandPalette';
 import { ConnectionsLayer } from './components/canvas/ConnectionsLayer';
+import { ConnectionPortPicker } from './components/canvas/ConnectionPortPicker';
 import { ContextMenu } from './components/ContextMenu';
 import { ContextMenuState, NodeData, NodeGroup, NodeStatus, NodeType } from './types';
 import { useCanvasNavigation } from './hooks/useCanvasNavigation';
 import { useNodeManagement } from './hooks/useNodeManagement';
-import { useConnectionDragging } from './hooks/useConnectionDragging';
+import { useConnectionDragging, type ConnectionDragDrop } from './hooks/useConnectionDragging';
 import { useNodeDragging } from './hooks/useNodeDragging';
 import { useGeneration } from './hooks/useGeneration';
 import { useImageEditGeneration } from './hooks/useImageEditGeneration';
@@ -38,6 +40,17 @@ import { useGenerationRecovery } from './hooks/useGenerationRecovery';
 import { useVideoFrameExtraction } from './hooks/useVideoFrameExtraction';
 import { useTimeline } from './hooks/useTimeline';
 import { createDefaultNodeData } from './domain/nodes/nodeRegistry';
+import {
+  createConnectionPortFeedbackIndex,
+  resolveConnectionDrop,
+  type ConnectionTargetChoice
+} from './domain/graph/semanticCanvas';
+import {
+  CANVAS_WHEEL_LISTENER_OPTIONS,
+  preventCanvasWheelDefault
+} from './utils/canvasWheel';
+import type { CanvasNodeSize } from './utils/connectionHitTesting';
+import { isNodeCommandPaletteShortcut } from './utils/nodeCommandPaletteShortcut';
 import { createEmptyTimelineDocument } from './domain/timeline/timelineDocument';
 import type { TimelineDocument } from './domain/timeline/timelineTypes';
 import type { WorkflowData } from './domain/workflow/workflowSchema';
@@ -68,6 +81,13 @@ import { isSeedanceVideoModel } from './utils/videoModelRouting';
 // MAIN COMPONENT
 // ============================================================================
 
+interface PendingConnectionPortSelection {
+  sourceNodeId: string;
+  sourcePortId: string;
+  targetNodeId: string;
+  choices: ConnectionTargetChoice[];
+}
+
 export default function App() {
   // ============================================================================
   // STATE
@@ -80,6 +100,8 @@ export default function App() {
     y: 0,
     type: 'global'
   });
+  const [pendingConnectionPortSelection, setPendingConnectionPortSelection] = useState<PendingConnectionPortSelection | null>(null);
+  const [isNodeCommandPaletteOpen, setIsNodeCommandPaletteOpen] = useState(false);
 
   const [canvasTheme, setCanvasTheme] = useState<'dark' | 'light'>('dark');
 
@@ -141,6 +163,7 @@ export default function App() {
     selectedNodeIds,
     setSelectedNodeIds,
     addNode,
+    addConnectedNodeFromSources,
     updateNode,
     applyNodeUpdates,
     deleteNode,
@@ -153,21 +176,44 @@ export default function App() {
     handleSelectTypeFromMenu
   } = useNodeManagement();
 
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  const viewportRef = useRef(viewport);
+  const [nodeSizes, setNodeSizes] = useState<Record<string, CanvasNodeSize>>({});
+  const nodeSizesRef = useRef(nodeSizes);
+  nodesRef.current = nodes;
+  edgesRef.current = edges;
+  viewportRef.current = viewport;
+  nodeSizesRef.current = nodeSizes;
+
+  const handleNodeBoundsChange = React.useCallback((nodeId: string, size: CanvasNodeSize) => {
+    setNodeSizes(previous => {
+      const current = previous[nodeId];
+      if (current?.width === size.width && current.height === size.height) return previous;
+      return { ...previous, [nodeId]: size };
+    });
+  }, []);
+
   const {
     isDraggingConnection,
     connectionStart,
     tempConnectionEnd,
-    hoveredNodeId: connectionHoveredNodeId,
     selectedEdgeId,
     setSelectedEdgeId,
     connectionError,
     reportConnectionError,
-    handleConnectorPointerDown,
+    handlePortPointerDown,
+    handlePortPointerEnter,
+    handlePortPointerLeave,
     updateConnectionDrag,
     completeConnectionDrag,
     handleEdgeClick,
     deleteSelectedConnection
   } = useConnectionDragging();
+  const portFeedbackByKey = React.useMemo(
+    () => createConnectionPortFeedbackIndex(nodes, edges, connectionStart),
+    [nodes, edges, connectionStart]
+  );
 
   const {
     handleNodePointerDown,
@@ -221,6 +267,8 @@ export default function App() {
     canUndo,
     canRedo
   } = useHistory({ nodes, edges, groups, timeline }, 50);
+  const currentHistoryStateRef = React.useRef({ nodes, edges, groups, timeline });
+  currentHistoryStateRef.current = { nodes, edges, groups, timeline };
 
   const handleWorkflowHistoryReset = React.useCallback((workflow: WorkflowData) => {
     resetHistory({
@@ -819,6 +867,43 @@ export default function App() {
     openAssetLibraryModal(contextMenu.y, closeWorkflowPanel);
   };
 
+  const openNodeCommandPalette = React.useCallback(() => {
+    setContextMenu(prev => ({ ...prev, isOpen: false }));
+    setPendingConnectionPortSelection(null);
+    setSelectedEdgeId(null);
+    closeWorkflowPanel();
+    closeHistoryPanel();
+    closeAssetLibrary();
+    closeTimeline();
+    setIsNodeCommandPaletteOpen(true);
+  }, [
+    closeAssetLibrary,
+    closeHistoryPanel,
+    closeTimeline,
+    closeWorkflowPanel,
+    setSelectedEdgeId
+  ]);
+
+  const handleNodeCommandPaletteSelect = React.useCallback((type: NodeType) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    const x = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+    const y = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
+
+    addNode(type, x, y, undefined, viewport, rect || { left: 0, top: 0 });
+    setIsNodeCommandPaletteOpen(false);
+  }, [addNode, canvasRef, viewport]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!isNodeCommandPaletteShortcut(event)) return;
+      event.preventDefault();
+      openNodeCommandPalette();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [openNodeCommandPalette]);
+
   /**
    * Convert pixel dimensions to closest standard aspect ratio
    */
@@ -947,12 +1032,10 @@ export default function App() {
     if (!canvas) return;
 
     const handleNativeWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-      }
+      preventCanvasWheelDefault(e);
     };
 
-    canvas.addEventListener('wheel', handleNativeWheel, { passive: false });
+    canvas.addEventListener('wheel', handleNativeWheel, CANVAS_WHEEL_LISTENER_OPTIONS);
     return () => canvas.removeEventListener('wheel', handleNativeWheel);
   }, []);
 
@@ -985,19 +1068,20 @@ export default function App() {
   // Apply history state when undo/redo is triggered
   // IMPORTANT: Don't revert nodes if any node is in LOADING status (generation in progress)
   useEffect(() => {
+    const currentState = currentHistoryStateRef.current;
     // Skip if any node is currently generating - don't interrupt the loading state
-    const hasLoadingNode = nodes.some(n => n.status === NodeStatus.LOADING);
+    const hasLoadingNode = currentState.nodes.some(n => n.status === NodeStatus.LOADING);
     if (hasLoadingNode) {
       return;
     }
 
-    if (!areCanvasHistoryStatesEqual(historyState, { nodes, edges, groups, timeline })) {
+    if (!areCanvasHistoryStatesEqual(historyState, currentState)) {
       isApplyingHistory.current = true;
       replaceGraph(historyState.nodes, historyState.edges);
       setGroups(historyState.groups);
       setTimeline(historyState.timeline);
     }
-  }, [historyState, nodes, edges, groups, timeline, replaceGraph, setGroups]);
+  }, [historyState, replaceGraph, setGroups, setTimeline]);
 
   // Simple wrapper for updateNode (sync code removed - TEXT node prompts are combined at generation time)
   const updateNodeWithSync = React.useCallback((id: string, updates: Partial<NodeData>) => {
@@ -1015,6 +1099,7 @@ export default function App() {
         startSelection(e);
         clearSelection();
         setSelectedEdgeId(null);
+        setPendingConnectionPortSelection(null);
         setContextMenu(prev => ({ ...prev, isOpen: false }));
         closeWorkflowPanel();
         closeHistoryPanel();
@@ -1024,6 +1109,7 @@ export default function App() {
       else {
         startPanning(e);
         setSelectedEdgeId(null);
+        setPendingConnectionPortSelection(null);
         setContextMenu(prev => ({ ...prev, isOpen: false }));
       }
     }
@@ -1037,7 +1123,14 @@ export default function App() {
     if (updateNodeDrag(e, viewport, setNodes, selectedNodeIds)) return;
 
     // 3. Handle Connection Dragging
-    if (updateConnectionDrag(e, nodes, viewport)) return;
+    const canvasRect = canvasRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
+    if (updateConnectionDrag(
+      e,
+      nodesRef.current,
+      viewportRef.current,
+      canvasRect,
+      nodeSizesRef.current
+    )) return;
 
     // 4. Handle Canvas Panning (disabled when selection box is active)
     if (!isSelecting) {
@@ -1051,14 +1144,203 @@ export default function App() {
    */
   const handleConnectionMade = React.useCallback((parentId: string, childId: string) => {
     // Find the parent node
-    const parentNode = nodes.find(n => n.id === parentId);
+    const parentNode = nodesRef.current.find(n => n.id === parentId);
     if (!parentNode) return;
 
     // If parent is a Text node, sync its prompt to the child
     if (parentNode.type === NodeType.TEXT && parentNode.prompt) {
       updateNode(childId, { prompt: parentNode.prompt });
     }
-  }, [nodes, updateNode]);
+  }, [updateNode]);
+
+  const createSemanticConnection = React.useCallback((
+    sourceNodeId: string,
+    sourcePortId: string,
+    targetNodeId: string,
+    targetPortId: string
+  ): boolean => {
+    const result = validateAndAddEdge(sourceNodeId, targetNodeId, { sourcePortId, targetPortId });
+    if (!result.valid) {
+      reportConnectionError(result.message || '无法创建连接。');
+      return false;
+    }
+    handleConnectionMade(sourceNodeId, targetNodeId);
+    return true;
+  }, [handleConnectionMade, reportConnectionError, validateAndAddEdge]);
+
+  const connectSelectedImageGroupToNearbyVideo = React.useCallback((): boolean => {
+    const group = getCommonGroup(selectedNodeIds);
+    if (!group) return false;
+
+    const currentNodes = nodesRef.current;
+    const selectedGroupNodes = currentNodes.filter(node =>
+      selectedNodeIds.includes(node.id) && node.groupId === group.id
+    );
+    if (selectedGroupNodes.length < 2) return false;
+
+    const imageNodes = selectedGroupNodes
+      .filter(node => node.type === NodeType.IMAGE && Boolean(node.resultUrl))
+      .sort((left, right) => (left.x - right.x) || (left.y - right.y));
+    if (imageNodes.length === 0) return false;
+
+    const sizeOf = (node: NodeData): CanvasNodeSize => nodeSizesRef.current[node.id] || {
+      width: node.type === NodeType.VIDEO ? 385 : 365,
+      height: node.type === NodeType.VIDEO ? 220 : 280
+    };
+    const bounds = selectedGroupNodes.reduce((acc, node) => {
+      const size = sizeOf(node);
+      return {
+        left: Math.min(acc.left, node.x),
+        top: Math.min(acc.top, node.y),
+        right: Math.max(acc.right, node.x + size.width),
+        bottom: Math.max(acc.bottom, node.y + size.height)
+      };
+    }, {
+      left: Number.POSITIVE_INFINITY,
+      top: Number.POSITIVE_INFINITY,
+      right: Number.NEGATIVE_INFINITY,
+      bottom: Number.NEGATIVE_INFINITY
+    });
+    const groupCenterY = (bounds.top + bounds.bottom) / 2;
+
+    const target = currentNodes
+      .filter(node => node.type === NodeType.VIDEO && node.groupId !== group.id)
+      .map(node => {
+        const size = sizeOf(node);
+        const leftGap = node.x - bounds.right;
+        const videoCenterY = node.y + size.height / 2;
+        const verticalDistance = Math.abs(videoCenterY - groupCenterY);
+        return { node, leftGap, verticalDistance };
+      })
+      .filter(candidate =>
+        candidate.leftGap >= -180 &&
+        candidate.leftGap <= 650 &&
+        candidate.verticalDistance <= Math.max(260, (bounds.bottom - bounds.top) / 2 + 160)
+      )
+      .sort((left, right) =>
+        Math.abs(left.leftGap) + left.verticalDistance - (Math.abs(right.leftGap) + right.verticalDistance)
+      )[0]?.node;
+
+    if (!target) return false;
+
+    const imageInputPortIds = new Set(['start-frame', 'end-frame', 'reference-images']);
+    edgesRef.current
+      .filter(edge => edge.targetNodeId === target.id && imageInputPortIds.has(edge.targetPortId))
+      .forEach(edge => removeEdge(edge.id));
+
+    let createdCount = 0;
+    imageNodes.forEach((sourceNode) => {
+      const result = validateAndAddEdge(sourceNode.id, target.id, {
+        sourcePortId: 'image-output',
+        targetPortId: 'reference-images'
+      });
+      if (result.valid) {
+        createdCount += 1;
+        handleConnectionMade(sourceNode.id, target.id);
+      }
+    });
+    return createdCount > 0;
+  }, [getCommonGroup, handleConnectionMade, removeEdge, selectedNodeIds, validateAndAddEdge]);
+
+  const createConnectedNodeFromSelection = React.useCallback((type: NodeType) => {
+    const currentNodes = nodesRef.current;
+    const group = getCommonGroup(selectedNodeIds);
+    const sourceNodes = currentNodes.filter(node =>
+      selectedNodeIds.includes(node.id) && (!group || node.groupId === group.id)
+    );
+    if (sourceNodes.length === 0) return;
+
+    const sizeOf = (node: NodeData): CanvasNodeSize => nodeSizesRef.current[node.id] || {
+      width: node.type === NodeType.VIDEO ? 385 : 365,
+      height: node.type === NodeType.VIDEO ? 220 : 280
+    };
+    const bounds = sourceNodes.reduce((acc, node) => {
+      const size = sizeOf(node);
+      return {
+        left: Math.min(acc.left, node.x),
+        top: Math.min(acc.top, node.y),
+        right: Math.max(acc.right, node.x + size.width),
+        bottom: Math.max(acc.bottom, node.y + size.height)
+      };
+    }, {
+      left: Number.POSITIVE_INFINITY,
+      top: Number.POSITIVE_INFINITY,
+      right: Number.NEGATIVE_INFINITY,
+      bottom: Number.NEGATIVE_INFINITY
+    });
+    const targetHeight = type === NodeType.VIDEO ? 220 : 280;
+    const targetX = bounds.right + 150;
+    const targetY = ((bounds.top + bounds.bottom) / 2) - (targetHeight / 2);
+    const result = addConnectedNodeFromSources(
+      type,
+      sourceNodes.map(node => node.id),
+      targetX,
+      targetY
+    );
+
+    if (result.connectedCount === 0 && type !== NodeType.TEXT) {
+      reportConnectionError('已创建节点，但当前组里没有可直接连接到它的素材。');
+    }
+  }, [addConnectedNodeFromSources, getCommonGroup, reportConnectionError, selectedNodeIds]);
+
+  const handleSemanticConnectionDrop = React.useCallback((drop: ConnectionDragDrop) => {
+    if (!drop.targetNodeId) return;
+
+    const startNode = nodesRef.current.find(node => node.id === drop.start.nodeId);
+    const targetNode = nodesRef.current.find(node => node.id === drop.targetNodeId);
+    if (!startNode || !targetNode) {
+      reportConnectionError('找不到连接的源节点或目标节点。');
+      return;
+    }
+
+    const targetPort = drop.targetPort;
+    if (targetPort) {
+      if (drop.start.direction === 'output' && targetPort.direction === 'input') {
+        createSemanticConnection(startNode.id, drop.start.portId, targetNode.id, targetPort.portId);
+        return;
+      }
+      if (drop.start.direction === 'input' && targetPort.direction === 'output') {
+        createSemanticConnection(targetNode.id, targetPort.portId, startNode.id, drop.start.portId);
+        return;
+      }
+      reportConnectionError('请从输出端口连接到另一个节点的输入端口。');
+      return;
+    }
+
+    if (drop.start.direction !== 'output') {
+      reportConnectionError('请将输入端口拖到上游节点的输出端口。');
+      return;
+    }
+
+    const resolution = resolveConnectionDrop(startNode, drop.start.portId, targetNode, edges);
+    if (resolution.kind === 'invalid') {
+      reportConnectionError(resolution.message);
+      return;
+    }
+    if (resolution.kind === 'connect') {
+      createSemanticConnection(startNode.id, resolution.sourcePort.id, targetNode.id, resolution.targetPort.id);
+      return;
+    }
+
+    setPendingConnectionPortSelection({
+      sourceNodeId: startNode.id,
+      sourcePortId: resolution.sourcePort.id,
+      targetNodeId: targetNode.id,
+      choices: resolution.choices
+    });
+  }, [createSemanticConnection, edges, reportConnectionError]);
+
+  const handleConnectionPortChoice = React.useCallback((targetPortId: string) => {
+    if (!pendingConnectionPortSelection) return;
+
+    const created = createSemanticConnection(
+      pendingConnectionPortSelection.sourceNodeId,
+      pendingConnectionPortSelection.sourcePortId,
+      pendingConnectionPortSelection.targetNodeId,
+      targetPortId
+    );
+    if (created) setPendingConnectionPortSelection(null);
+  }, [createSemanticConnection, pendingConnectionPortSelection]);
 
   const handleGlobalPointerUp = (e: React.PointerEvent) => {
     // 1. Handle Selection Box End
@@ -1070,7 +1352,16 @@ export default function App() {
     }
 
     // 2. Handle Connection Drop
-    if (completeConnectionDrag(handleAddNext, validateAndAddEdge, handleConnectionMade)) {
+    const canvasRect = canvasRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
+    if (completeConnectionDrag(
+      e,
+      handleAddNext,
+      handleSemanticConnectionDrop,
+      nodesRef.current,
+      viewportRef.current,
+      canvasRect,
+      nodeSizesRef.current
+    )) {
       releasePointerCapture(e);
       return;
     }
@@ -1078,12 +1369,37 @@ export default function App() {
     // 3. Stop Panning
     endPanning();
 
-    // 4. Stop Node Dragging
+    // 4. Auto-connect a dragged image group to the nearby video node.
+    if (isDragging) {
+      connectSelectedImageGroupToNearbyVideo();
+    }
+
+    // 5. Stop Node Dragging
     endNodeDrag();
 
-    // 5. Release capture
+    // 6. Release capture
     releasePointerCapture(e);
   };
+
+  const handleGlobalMouseUp = (e: React.MouseEvent) => {
+    const canvasRect = canvasRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
+    completeConnectionDrag(
+      e,
+      handleAddNext,
+      handleSemanticConnectionDrop,
+      nodesRef.current,
+      viewportRef.current,
+      canvasRect,
+      nodeSizesRef.current
+    );
+  };
+
+  const pendingConnectionSource = pendingConnectionPortSelection
+    ? nodes.find(node => node.id === pendingConnectionPortSelection.sourceNodeId)
+    : undefined;
+  const pendingConnectionTarget = pendingConnectionPortSelection
+    ? nodes.find(node => node.id === pendingConnectionPortSelection.targetNodeId)
+    : undefined;
 
   // Context menu handlers provided by useContextMenuHandlers hook
   // handleDoubleClick, handleGlobalContextMenu, handleAddNext, handleNodeContextMenu,
@@ -1091,7 +1407,11 @@ export default function App() {
 
 
   return (
-    <div className={`w-screen h-screen ${canvasTheme === 'dark' ? 'bg-[#050505] text-white' : 'bg-neutral-50 text-neutral-900'} overflow-hidden select-none font-sans transition-colors duration-300`}>
+    <div
+      className={`w-screen h-screen ${canvasTheme === 'dark' ? 'bg-[#050505] text-white' : 'bg-neutral-50 text-neutral-900'} overflow-hidden select-none font-sans transition-colors duration-300`}
+      onPointerUp={handleGlobalPointerUp}
+      onMouseUp={handleGlobalMouseUp}
+    >
       {!storyboardGenerator.isModalOpen && !isTikTokModalOpen && (
         <Toolbar
           onAddClick={handleToolbarAdd}
@@ -1249,6 +1569,25 @@ export default function App() {
         </div>
       )}
 
+      {pendingConnectionPortSelection && pendingConnectionSource && pendingConnectionTarget && (
+        <ConnectionPortPicker
+          sourceNode={pendingConnectionSource}
+          sourcePortId={pendingConnectionPortSelection.sourcePortId}
+          targetNode={pendingConnectionTarget}
+          choices={pendingConnectionPortSelection.choices}
+          onSelect={handleConnectionPortChoice}
+          onClose={() => setPendingConnectionPortSelection(null)}
+          canvasTheme={canvasTheme}
+        />
+      )}
+
+      <NodeCommandPalette
+        isOpen={isNodeCommandPaletteOpen}
+        onClose={() => setIsNodeCommandPaletteOpen(false)}
+        onSelect={handleNodeCommandPaletteSelect}
+        canvasTheme={canvasTheme}
+      />
+
       {/* Canvas */}
       <div
         ref={canvasRef}
@@ -1256,7 +1595,6 @@ export default function App() {
         className="absolute inset-0 cursor-grab active:cursor-grabbing"
         onPointerDown={handlePointerDown}
         onPointerMove={handleGlobalPointerMove}
-        onPointerUp={handleGlobalPointerUp}
         onWheel={handleWheel}
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleGlobalContextMenu}
@@ -1287,13 +1625,16 @@ export default function App() {
             <ConnectionsLayer
               nodes={nodes}
               edges={edges}
-              viewport={viewport}
+              nodeSizes={nodeSizes}
               canvasTheme={canvasTheme}
               isDraggingConnection={isDraggingConnection}
               connectionStart={connectionStart}
               tempConnectionEnd={tempConnectionEnd}
               selectedEdgeId={selectedEdgeId}
-              onEdgeClick={handleEdgeClick}
+              onEdgeClick={(event, edgeId) => {
+                setSelectedNodeIds([]);
+                handleEdgeClick(event, edgeId);
+              }}
             />
           </svg>
 
@@ -1339,10 +1680,10 @@ export default function App() {
                 onCancelStoryTask={storyboardGenerator.cancelTaskForNode}
                 onRetryStoryTask={storyboardGenerator.retryTaskForNode}
                 onAddStoryboardToTimeline={addStoryboardVideosToTimeline}
-                onAddNext={handleAddNext}
                 selected={selectedNodeIds.includes(node.id)}
                 showControls={selectedNodeIds.length === 1 && selectedNodeIds.includes(node.id)}
                 onNodePointerDown={(e) => {
+                  setSelectedEdgeId(null);
                   // If shift is held, preserve selection for multi-drag/multi-select
                   if (e.shiftKey) {
                     if (selectedNodeIds.includes(node.id)) {
@@ -1360,8 +1701,12 @@ export default function App() {
                 }}
                 onContextMenu={handleNodeContextMenu}
                 onSelect={(id) => setSelectedNodeIds([id])}
-                onConnectorDown={handleConnectorPointerDown}
-                isHoveredForConnection={connectionHoveredNodeId === node.id}
+                isConnectionActive={isDraggingConnection}
+                portFeedbackByKey={portFeedbackByKey}
+                onPortPointerDown={handlePortPointerDown}
+                onPortPointerEnter={handlePortPointerEnter}
+                onPortPointerLeave={handlePortPointerLeave}
+                onBoundsChange={handleNodeBoundsChange}
                 onOpenEditor={handleOpenEditor}
                 onUpload={handleUpload}
                 onAudioUpload={handleAudioNodeUpload}
@@ -1398,6 +1743,7 @@ export default function App() {
                 const group = getCommonGroup(selectedNodeIds);
                 if (group) ungroupNodes(group.id, setNodes);
               }}
+              onCreateConnectedNode={createConnectedNodeFromSelection}
               onBoundingBoxPointerDown={(e) => {
                 // Start dragging all selected nodes when clicking on bounding box
                 e.stopPropagation();
