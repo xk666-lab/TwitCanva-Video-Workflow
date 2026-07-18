@@ -3,7 +3,7 @@ import type {
   MediaGenerationTaskOutput
 } from '../domain/generation/generationTask.ts';
 import type { NodeData } from '../types.ts';
-import { buildGenerationSuccessUpdate } from './takeHelpers.ts';
+import { buildPrimaryMediaResultUpdate } from './mediaResultNodes.ts';
 
 function normalizeTaskProgress(progress: unknown): number | undefined {
   if (typeof progress !== 'number' || !Number.isFinite(progress)) return undefined;
@@ -34,12 +34,10 @@ export function buildGenerationTaskNodeUpdate(
   if (!canApplyGenerationTaskResult(node, task)) return {};
 
   if (task.status === 'succeeded' && isMediaGenerationTaskOutput(task.output)) {
-    return {
-      ...buildGenerationSuccessUpdate(node, task.output),
-      activeTaskId: undefined,
-      lastTaskId: task.taskId,
-      generationProgress: undefined
-    };
+    return buildPrimaryMediaResultUpdate(node, task.output, {
+      clearActiveTask: true,
+      lastTaskId: task.taskId
+    });
   }
 
   if (task.status === 'failed' || task.status === 'cancelled') {
@@ -51,6 +49,7 @@ export function buildGenerationTaskNodeUpdate(
       activeTaskId: undefined,
       lastTaskId: task.taskId,
       generationProgress: undefined,
+      generationProgressMessage: undefined,
       generationStartTime: undefined
     };
   }
@@ -59,6 +58,7 @@ export function buildGenerationTaskNodeUpdate(
     status: 'loading' as NodeData['status'],
     activeTaskId: task.taskId,
     generationProgress: normalizeTaskProgress(task.progress),
+    generationProgressMessage: task.progressMessage,
     errorMessage: undefined
   };
 }

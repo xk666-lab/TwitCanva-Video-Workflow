@@ -78,12 +78,14 @@ test('successful task update appends its take and clears the active task', () =>
   assert.equal(update.activeTaskId, undefined);
   assert.equal(update.lastTaskId, 'task-current');
   assert.equal(update.generationProgress, undefined);
+  assert.equal(update.generationProgressMessage, undefined);
 });
 
 test('non-terminal task update carries progress for canvas feedback', () => {
   const update = buildGenerationTaskNodeUpdate(createNode(), createTask({
     status: 'running',
     progress: 37,
+    progressMessage: 'Provider task created',
     output: undefined,
     completedAt: undefined
   }));
@@ -91,6 +93,7 @@ test('non-terminal task update carries progress for canvas feedback', () => {
   assert.equal(update.status, 'loading');
   assert.equal(update.activeTaskId, 'task-current');
   assert.equal(update.generationProgress, 37);
+  assert.equal(update.generationProgressMessage, 'Provider task created');
 });
 
 test('story package output does not enter the generic media success path', () => {
@@ -135,6 +138,7 @@ test('failed and cancelled tasks become retryable compatibility errors', () => {
   assert.equal(failed.errorMessage, 'Timed out');
   assert.equal(failed.activeTaskId, undefined);
   assert.equal(failed.generationProgress, undefined);
+  assert.equal(failed.generationProgressMessage, undefined);
 
   const cancelled = buildGenerationTaskNodeUpdate(createNode(), createTask({
     status: 'cancelled',

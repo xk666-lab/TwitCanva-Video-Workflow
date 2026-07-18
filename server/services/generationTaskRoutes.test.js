@@ -232,6 +232,64 @@ test('the Seedance task executor forwards audio references without contacting a 
     ]);
 });
 
+test('the Seedance task executor forwards provider progress updates to the task manager callback', async t => {
+    const originalFetch = globalThis.fetch;
+    const libraryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'twitcanva-seedance-progress-'));
+    const videosDir = path.join(libraryDir, 'videos');
+    fs.mkdirSync(videosDir, { recursive: true });
+    t.after(() => {
+        globalThis.fetch = originalFetch;
+        fs.rmSync(libraryDir, { recursive: true, force: true });
+    });
+
+    globalThis.fetch = async url => {
+        if (String(url) === 'https://cdn.example.com/progress-result.mp4') {
+            return new Response(Buffer.from('video-result'), { status: 200 });
+        }
+        throw new Error(`Unexpected fetch: ${String(url)}`);
+    };
+
+    const progressEvents = [];
+    const executor = createGenerationTaskExecutor({
+        SEEDANCE_API_KEY: 'test-key',
+        LIBRARY_DIR: libraryDir,
+        VIDEOS_DIR: videosDir
+    }, {
+        generateSeedanceVideo: async ({ onProgress }) => {
+            onProgress?.({
+                providerTaskId: 'seedance-provider-task',
+                progress: 23,
+                progressMessage: 'Provider task created'
+            });
+            return 'https://cdn.example.com/progress-result.mp4';
+        }
+    });
+    const output = await executor(createTask({
+        taskId: 'seedance-progress-task',
+        operation: 'generate-video',
+        provider: 'seedance',
+        model: 'bytedance/seedance-2.0/text-to-video',
+        inputSnapshot: {
+            nodeId: 'video-node',
+            prompt: 'A paper bird speaks.',
+            videoModel: 'bytedance/seedance-2.0/text-to-video'
+        }
+    }), update => progressEvents.push(update));
+
+    assert.equal(output.resultUrl.startsWith('/library/videos/'), true);
+    assert.deepEqual(progressEvents, [
+        {
+            providerTaskId: 'seedance-provider-task',
+            progress: 23,
+            progressMessage: 'Provider task created'
+        },
+        {
+            progress: 96,
+            progressMessage: 'Downloading provider result'
+        }
+    ]);
+});
+
 test('POST generation-tasks validates operation before calling the manager', async t => {
     const libraryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'twitcanva-task-route-'));
     t.after(() => fs.rmSync(libraryDir, { recursive: true, force: true }));

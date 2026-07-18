@@ -237,6 +237,8 @@ function resetNodeRuntimeState(
     errorMessage: _errorMessage,
     activeTaskId: _activeTaskId,
     lastTaskId: _lastTaskId,
+    generationProgress: _generationProgress,
+    generationProgressMessage: _generationProgressMessage,
     generationStartTime: _generationStartTime,
     inputUrl: _inputUrl,
     subjectAssetId: _subjectAssetId,

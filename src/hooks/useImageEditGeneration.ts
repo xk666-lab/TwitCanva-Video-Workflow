@@ -51,6 +51,8 @@ export function useImageEditGeneration({
               status: 'loading' as NodeData['status'],
               activeTaskId: task.taskId,
               errorMessage: undefined,
+              generationProgress: task.progress,
+              generationProgressMessage: task.progressMessage,
               generationStartTime: Date.now()
             });
           }
@@ -60,6 +62,8 @@ export function useImageEditGeneration({
           status: 'error' as NodeData['status'],
           errorMessage: error instanceof Error ? error.message : 'Unable to submit image edit.',
           activeTaskId: undefined,
+          generationProgress: undefined,
+          generationProgressMessage: undefined,
           generationStartTime: undefined
         });
       }

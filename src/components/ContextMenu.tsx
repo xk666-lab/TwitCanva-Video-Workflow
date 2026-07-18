@@ -32,13 +32,14 @@ interface ContextMenuProps {
   onUndo?: () => void;
   onRedo?: () => void;
   onPaste?: () => void;
-  onCopy?: () => void;
-  onDuplicate?: () => void;
+  onCopy?: (sourceNodeId?: string) => void;
+  onDuplicate?: (sourceNodeId?: string) => void;
   onSaveTemplate?: () => void;
   onCreateAsset?: () => void;
   onAddAssets?: () => void;
   canUndo?: boolean;
   canRedo?: boolean;
+  canPaste?: boolean;
   canvasTheme?: 'dark' | 'light';
 }
 
@@ -57,6 +58,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onAddAssets,
   canUndo = false,
   canRedo = false,
+  canPaste = false,
   canvasTheme = 'dark'
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -154,7 +156,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             shortcut="CtrlC"
             onClick={() => {
               if (onCopy) {
-                onCopy();
+                onCopy(state.sourceNodeId);
                 onClose();
               }
             }}
@@ -165,7 +167,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             label="粘贴"
             shortcut="CtrlV"
             onClick={handlePaste}
-            disabled={true} // Disabled in screenshot
+            disabled={!canPaste}
             canvasTheme={canvasTheme}
           />
           <MenuItem
@@ -173,7 +175,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             label="复制一份"
             onClick={() => {
               if (onDuplicate) {
-                onDuplicate();
+                onDuplicate(state.sourceNodeId);
                 onClose();
               }
             }}
@@ -277,6 +279,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             label="粘贴"
             shortcut="CtrlV"
             onClick={handlePaste}
+            disabled={!canPaste}
             canvasTheme={canvasTheme}
           />
         </div>

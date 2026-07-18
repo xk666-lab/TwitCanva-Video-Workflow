@@ -528,7 +528,8 @@ export default function App() {
   const {
     handleCopy,
     handlePaste,
-    handleDuplicate
+    handleDuplicate,
+    canPaste
   } = useKeyboardShortcuts({
     nodes,
     selectedNodeIds,
@@ -555,6 +556,7 @@ export default function App() {
   // Generation Recovery Management
   useGenerationRecovery({
     nodes,
+    setNodes,
     updateNode,
     applyNodeUpdates
   });
@@ -1841,6 +1843,7 @@ export default function App() {
         onAddAssets={handleContextMenuAddAssets}
         canUndo={canUndo}
         canRedo={canRedo}
+        canPaste={canPaste}
         canvasTheme={canvasTheme}
       />
 

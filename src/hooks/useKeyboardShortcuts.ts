@@ -4,8 +4,12 @@
  * Handles keyboard shortcuts: undo/redo, copy/paste, delete, escape.
  */
 
-import React, { useCallback, useRef, useEffect } from 'react';
+import React, { useCallback, useRef, useEffect, useState } from 'react';
 import { NodeData, ContextMenuState } from '../types';
+import {
+    createPastedNodes,
+    getClipboardSourceNodes
+} from '../utils/clipboardNodes.ts';
 
 interface UseKeyboardShortcutsOptions {
     nodes: NodeData[];
@@ -37,30 +41,24 @@ export const useKeyboardShortcuts = ({
     redo
 }: UseKeyboardShortcutsOptions) => {
     const clipboardRef = useRef<NodeData[]>([]);
+    const [canPaste, setCanPaste] = useState(false);
 
     // ============================================================================
     // COPY / PASTE / DUPLICATE
     // ============================================================================
 
-    const handleCopy = useCallback(() => {
-        if (selectedNodeIds.length > 0) {
-            const selectedNodes = nodes.filter(n => selectedNodeIds.includes(n.id));
-            clipboardRef.current = JSON.parse(JSON.stringify(selectedNodes));
-            console.log(`Copied ${selectedNodes.length} node(s)`);
+    const handleCopy = useCallback((sourceNodeId?: string) => {
+        const copiedNodes = getClipboardSourceNodes(nodes, selectedNodeIds, sourceNodeId);
+        clipboardRef.current = copiedNodes;
+        setCanPaste(copiedNodes.length > 0);
+        if (copiedNodes.length > 0) {
+            console.log(`Copied ${copiedNodes.length} node(s)`);
         }
     }, [nodes, selectedNodeIds]);
 
     const handlePaste = useCallback(() => {
         if (clipboardRef.current.length > 0) {
-            const pasteOffset = 50;
-            const newNodes: NodeData[] = clipboardRef.current.map(node => ({
-                ...node,
-                id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-                x: node.x + pasteOffset,
-                y: node.y + pasteOffset,
-                parentIds: undefined,
-                groupId: undefined
-            }));
+            const newNodes = createPastedNodes(clipboardRef.current, { offset: 50 });
 
             setNodes(prev => [...prev, ...newNodes]);
             setSelectedNodeIds(newNodes.map(n => n.id));
@@ -68,20 +66,10 @@ export const useKeyboardShortcuts = ({
         }
     }, [setNodes, setSelectedNodeIds]);
 
-    const handleDuplicate = useCallback(() => {
-        if (selectedNodeIds.length > 0) {
-            const selectedNodes = nodes.filter(n => selectedNodeIds.includes(n.id));
-            const nodesToDuplicate = JSON.parse(JSON.stringify(selectedNodes));
-
-            const offset = 20;
-            const newNodes: NodeData[] = nodesToDuplicate.map((node: NodeData) => ({
-                ...node,
-                id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-                x: node.x + offset,
-                y: node.y + offset,
-                parentIds: undefined,
-                groupId: undefined
-            }));
+    const handleDuplicate = useCallback((sourceNodeId?: string) => {
+        const nodesToDuplicate = getClipboardSourceNodes(nodes, selectedNodeIds, sourceNodeId);
+        if (nodesToDuplicate.length > 0) {
+            const newNodes = createPastedNodes(nodesToDuplicate, { offset: 20 });
 
             setNodes(prev => [...prev, ...newNodes]);
             setSelectedNodeIds(newNodes.map(n => n.id));
@@ -157,6 +145,7 @@ export const useKeyboardShortcuts = ({
     return {
         handleCopy,
         handlePaste,
-        handleDuplicate
+        handleDuplicate,
+        canPaste
     };
 };

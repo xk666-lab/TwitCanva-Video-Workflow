@@ -43,6 +43,8 @@ test('normalizeLegacyNodeTakes exposes old resultUrl as the hero take', () => {
 test('buildGenerationSuccessUpdate clears loading metadata and applies hero take invariants', () => {
   const loadingNode = imageNode({
     status: 'loading' as NodeStatus,
+    generationProgress: 42,
+    generationProgressMessage: 'Provider task created',
     generationStartTime: 1783910000000
   });
   const nextTake: MediaTake = {
@@ -61,6 +63,8 @@ test('buildGenerationSuccessUpdate clears loading metadata and applies hero take
   assert.equal(updates.status, 'success');
   assert.equal(updates.resultUrl, '/library/images/next.png');
   assert.equal(updates.heroTakeId, 'take-next');
+  assert.equal(updates.generationProgress, undefined);
+  assert.equal(updates.generationProgressMessage, undefined);
   assert.equal(updates.generationStartTime, undefined);
   assert.equal(updates.errorMessage, undefined);
   assert.deepEqual(updates.takes?.map(take => take.isHero), [false, true]);

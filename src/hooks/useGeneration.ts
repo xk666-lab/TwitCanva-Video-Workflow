@@ -75,6 +75,7 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
                     status: NodeStatus.LOADING,
                     activeTaskId: task.taskId,
                     generationProgress: task.progress,
+                    generationProgressMessage: task.progressMessage,
                     errorMessage: undefined,
                     generationStartTime: Date.now()
                 });
@@ -100,7 +101,12 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
 
         if (!combinedPrompt && !isKlingFrameToFrame) return;
 
-        updateNode(id, { status: NodeStatus.LOADING, generationProgress: 0, generationStartTime: Date.now() });
+        updateNode(id, {
+            status: NodeStatus.LOADING,
+            generationProgress: 0,
+            generationProgressMessage: 'Submitting task',
+            generationStartTime: Date.now()
+        });
 
         try {
             if (node.type === NodeType.IMAGE || node.type === NodeType.IMAGE_EDITOR) {
@@ -163,6 +169,7 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
                         errorMessage: 'No local model selected. Please select a model first.',
                         lastTaskId: undefined,
                         generationProgress: undefined,
+                        generationProgressMessage: undefined,
                         generationStartTime: undefined
                     });
                     return;
@@ -212,6 +219,7 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
                         errorMessage: '音频参考目前仅支持 Seedance 视频模型。',
                         lastTaskId: undefined,
                         generationProgress: undefined,
+                        generationProgressMessage: undefined,
                         generationStartTime: undefined
                     });
                     return;
@@ -273,6 +281,7 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
                 errorMessage,
                 lastTaskId: undefined,
                 generationProgress: undefined,
+                generationProgressMessage: undefined,
                 generationStartTime: undefined
             });
             console.error('Generation failed:', error);
@@ -294,6 +303,7 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
             updateNode(id, {
                 status: NodeStatus.LOADING,
                 generationProgress: undefined,
+                generationProgressMessage: undefined,
                 errorMessage: error instanceof Error ? error.message : 'Unable to request cancellation.'
             });
             console.error('Failed to cancel generation task:', error);
@@ -308,6 +318,7 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
             status: NodeStatus.LOADING,
             errorMessage: undefined,
             generationProgress: 0,
+            generationProgressMessage: 'Retrying task',
             generationStartTime: Date.now()
         });
         try {
@@ -317,6 +328,7 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
                 activeTaskId: task.taskId,
                 errorMessage: undefined,
                 generationProgress: task.progress,
+                generationProgressMessage: task.progressMessage,
                 generationStartTime: Date.now()
             });
         } catch (error) {
@@ -324,6 +336,7 @@ export const useGeneration = ({ nodes, edges, workflowId, updateNode }: UseGener
                 status: NodeStatus.ERROR,
                 errorMessage: error instanceof Error ? error.message : 'Unable to retry generation.',
                 generationProgress: undefined,
+                generationProgressMessage: undefined,
                 generationStartTime: undefined
             });
             console.error('Failed to retry generation task:', error);

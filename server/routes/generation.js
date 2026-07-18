@@ -660,7 +660,7 @@ async function executeImageGeneration(inputSnapshot, locals) {
 // VIDEO GENERATION
 // ============================================================================
 
-async function executeVideoGeneration(inputSnapshot, locals) {
+async function executeVideoGeneration(inputSnapshot, locals, dependencies = {}, onTaskProgress) {
         const { nodeId, generationTaskId, prompt, imageBase64: rawImageBase64, lastFrameBase64: rawLastFrameBase64, motionReferenceUrl: rawMotionReferenceUrl, audioReference: rawAudioReference, aspectRatio, resolution, duration, videoModel } = inputSnapshot;
         const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, HAILUO_API_KEY, SEEDANCE_API_KEY, SEEDANCE_BASE_URL, SEEDANCE_SUBMIT_PATH, SEEDANCE_STATUS_PATH, VIDEOS_DIR } = locals;
 
@@ -800,7 +800,8 @@ async function executeVideoGeneration(inputSnapshot, locals) {
 
             console.log(`Using Seedance model: ${videoModel}, duration: ${duration || 'Auto'}`);
 
-            const seedanceVideoUrl = await generateSeedanceVideo({
+            const generateSeedance = dependencies.generateSeedanceVideo || generateSeedanceVideo;
+            const seedanceVideoUrl = await generateSeedance({
                 prompt,
                 imageBase64: seedanceImageBase64Array.length > 0 ? seedanceImageBase64Array : imageBase64,
                 imageReference: rawImageInputs.length > 0 ? rawImageInputs : rawImageBase64,
@@ -818,9 +819,11 @@ async function executeVideoGeneration(inputSnapshot, locals) {
                 statusPath: SEEDANCE_STATUS_PATH,
                 assetStorage: {
                     libraryDir: locals.LIBRARY_DIR
-                }
+                },
+                onProgress: onTaskProgress
             });
 
+            onTaskProgress?.({ progress: 96, progressMessage: 'Downloading provider result' });
             const videoResponse = await fetch(seedanceVideoUrl);
             if (!videoResponse.ok) {
                 throw new Error('Failed to download video from Seedance');
@@ -887,10 +890,10 @@ async function executeVideoGeneration(inputSnapshot, locals) {
 }
 
 export function createGenerationTaskExecutor(locals, dependencies = {}) {
-    return task => executeGenerationTask(task, locals, dependencies);
+    return (task, onTaskProgress) => executeGenerationTask(task, locals, dependencies, onTaskProgress);
 }
 
-export async function executeGenerationTask(task, locals, dependencies = {}) {
+export async function executeGenerationTask(task, locals, dependencies = {}, onTaskProgress) {
     if (task.operation === 'generate-story-package') {
         const payload = {
             story: task.inputSnapshot.sourceText,
@@ -915,7 +918,12 @@ export async function executeGenerationTask(task, locals, dependencies = {}) {
         return executeImageGeneration({ ...task.inputSnapshot, generationTaskId: task.taskId }, locals);
     }
     if (task.operation === 'generate-video') {
-        return executeVideoGeneration({ ...task.inputSnapshot, generationTaskId: task.taskId }, locals);
+        return executeVideoGeneration(
+            { ...task.inputSnapshot, generationTaskId: task.taskId },
+            locals,
+            dependencies,
+            onTaskProgress
+        );
     }
     if (task.operation === 'generate-local-image') {
         const { executeLocalImageGeneration } = await import('./local-models.js');

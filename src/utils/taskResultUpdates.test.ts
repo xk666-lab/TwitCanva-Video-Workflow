@@ -187,12 +187,14 @@ test('story task start updates bind the same task to both matching revisions', (
   const updates = buildStoryTaskStartUpdates(nodes(), task({
     status: 'queued',
     progress: 0,
+    progressMessage: 'Queued',
     output: undefined
   }));
 
   assert.equal(updates['script-1'].activeTaskId, 'task-1');
   assert.equal(updates['storyboard-1'].activeTaskId, 'task-1');
   assert.equal(updates['script-1'].status, 'loading');
+  assert.equal(updates['script-1'].generationProgressMessage, 'Queued');
 });
 
 test('story task start refuses stale retry snapshots', () => {

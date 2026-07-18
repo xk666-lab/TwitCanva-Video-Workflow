@@ -63,6 +63,7 @@ type SemanticCanvasModule = {
     }>;
     heroTake?: { id: string; url: string; type: 'image' | 'video'; thumbnailUrl?: string };
     activeTaskId?: string;
+    generationProgressMessage?: string;
   };
   getEdgeInspectorData?: (edge: CanvasEdge, nodes: NodeData[]) => {
     id: string;
@@ -299,6 +300,7 @@ test('derives Inspector input, Hero Take, task, and Edge data from the graph sta
   const target = {
     ...node('image', '图片'),
     activeTaskId: 'task-image-1',
+    generationProgressMessage: 'Provider task created',
     heroTakeId: 'take-hero',
     takes: [{
       id: 'take-hero',
@@ -338,6 +340,7 @@ test('derives Inspector input, Hero Take, task, and Edge data from the graph sta
     type: 'image'
   });
   assert.equal(nodeData.activeTaskId, 'task-image-1');
+  assert.equal(nodeData.generationProgressMessage, 'Provider task created');
 
   const edgeData = semanticCanvas.getEdgeInspectorData!(promptEdge, [source, target]);
   assert.equal(edgeData.id, 'prompt-edge');

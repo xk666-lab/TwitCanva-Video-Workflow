@@ -93,6 +93,7 @@ const GenerationProgressIndicator: React.FC<{
             : 'Rendering image';
     const taskLabel = data.activeTaskId ? `Task ${data.activeTaskId.slice(0, 8)}` : 'Preparing task';
     const valueLabel = displayProgress !== undefined ? `${displayProgress}%` : formatDuration(elapsedSeconds);
+    const progressMessage = data.generationProgressMessage || 'Provider response';
 
     return (
         <div className="relative w-[252px] max-w-[82%] overflow-hidden rounded-[18px] border border-white/[0.08] bg-[#07090a]/75 px-3.5 py-3 shadow-[0_18px_55px_rgba(0,0,0,0.45)] backdrop-blur-xl">
@@ -121,7 +122,7 @@ const GenerationProgressIndicator: React.FC<{
                 />
             </div>
             <div className="relative mt-2 flex items-center justify-between gap-2 text-[10px] text-white/35">
-                <span className="truncate">Provider response</span>
+                <span className="truncate" title={progressMessage}>{progressMessage}</span>
                 <span className="shrink-0 font-mono tabular-nums">{elapsedSeconds > 0 ? formatDuration(elapsedSeconds) : '0s'}</span>
             </div>
         </div>
@@ -318,6 +319,7 @@ export const NodeContent: React.FC<NodeContentProps> = ({
     const isAudioType = data.type === NodeType.AUDIO;
     const generationElapsedSeconds = useGenerationElapsedSeconds(isLoading, data.generationStartTime);
     const imageTakes = (data.takes || []).filter(take => take.type === 'image' && take.url);
+    const shouldShowImageTakeGallery = imageTakes.some(take => take.metadata?.displayInNodeGallery === true);
 
     // Sync local state ONLY when data.prompt changes externally (not from our own update)
     useEffect(() => {
@@ -471,7 +473,7 @@ export const NodeContent: React.FC<NodeContentProps> = ({
             )}
 
             {/* Result View - Show when successful OR when regenerating (loading with existing content) */}
-            {(isSuccess || isLoading) && isImageType && imageTakes.length > 1 ? (
+            {shouldShowImageTakeGallery && (isSuccess || isLoading) && isImageType && imageTakes.length > 1 ? (
                 <ImageTakeGallery
                     data={data}
                     takes={imageTakes}

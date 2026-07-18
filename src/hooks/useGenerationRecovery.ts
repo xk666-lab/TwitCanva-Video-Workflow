@@ -9,18 +9,22 @@ import { useEffect, useCallback, useRef } from 'react';
 import { NodeData, NodeStatus } from '../types';
 import { apiGet } from '../services/apiClient';
 import { queryGenerationTasks } from '../services/generationService';
-import type { GenerationTask } from '../domain/generation/generationTask';
+import type {
+    GenerationTask,
+    MediaGenerationTaskOutput
+} from '../domain/generation/generationTask';
 import {
     buildGenerationTaskNodeUpdates,
     getUniqueActiveTaskIds,
     recoverMissingMediaTaskNodes
 } from '../domain/generation/taskResultUpdates';
 import type { NodeUpdateMap } from '../domain/nodes/nodeUpdates';
-import { buildGenerationSuccessUpdate } from '../utils/takeHelpers';
+import { applyMediaResultToCanvasNodes } from '../utils/mediaResultNodes';
 import { extractVideoLastFrame } from '../utils/videoHelpers';
 
 interface UseGenerationRecoveryOptions {
     nodes: NodeData[];
+    setNodes: (updater: (previous: NodeData[]) => NodeData[]) => void;
     updateNode: (id: string, updates: Partial<NodeData>) => void;
     applyNodeUpdates: (updates: NodeUpdateMap) => void;
 }
@@ -69,6 +73,7 @@ function readVideoResultAspectRatio(url: string): Promise<Partial<Pick<NodeData,
 
 export const useGenerationRecovery = ({
     nodes,
+    setNodes,
     updateNode,
     applyNodeUpdates
 }: UseGenerationRecoveryOptions) => {
@@ -114,15 +119,22 @@ export const useGenerationRecovery = ({
                     ? currentNode.activeTaskId !== expectedTaskId
                     : currentNode.activeTaskId)) return;
                 if (generationMarker && currentNode.generationStartTime !== generationMarker) return;
-                updateNode(nodeId, {
-                    ...buildGenerationSuccessUpdate(currentNode, { resultUrl: data.resultUrl, take: data.take, takes: data.takes }),
-                    ...extraUpdates,
-                    generationProgress: undefined,
-                    ...(expectedTaskId ? {
-                        activeTaskId: undefined,
-                        lastTaskId: expectedTaskId,
-                        generationProgress: undefined
-                    } : {})
+                setNodes(previous => {
+                    const latestNode = previous.find(candidate => candidate.id === nodeId);
+                    if (!latestNode || (expectedTaskId
+                        ? latestNode.activeTaskId !== expectedTaskId
+                        : latestNode.activeTaskId)) return previous;
+                    if (generationMarker && latestNode.generationStartTime !== generationMarker) return previous;
+
+                    return applyMediaResultToCanvasNodes(previous, nodeId, {
+                        resultUrl: data.resultUrl,
+                        take: data.take,
+                        takes: data.takes
+                    }, {
+                        expectedActiveTaskId: expectedTaskId,
+                        lastTaskId: expectedTaskId || data.task?.taskId,
+                        extraUpdates
+                    }).nodes;
                 });
             } else if (data.status === 'error' || data.status === 'cancelled') {
                 const node = nodesRef.current.find(candidate => candidate.id === nodeId);
@@ -139,13 +151,14 @@ export const useGenerationRecovery = ({
                     activeTaskId: undefined,
                     lastTaskId: expectedTaskId || data.task?.taskId,
                     generationProgress: undefined,
+                    generationProgressMessage: undefined,
                     generationStartTime: undefined
                 });
             }
         } catch (error) {
             console.error(`[Recovery] Error checking status for node ${nodeId}:`, error);
         }
-    }, [updateNode]); // Only updateNode as dependency, nodes accessed via ref
+    }, [setNodes, updateNode]); // Nodes accessed via ref
 
     const applyTask = useCallback(async (task: GenerationTask) => {
         const updates = buildGenerationTaskNodeUpdates(nodesRef.current, task);
@@ -173,13 +186,15 @@ export const useGenerationRecovery = ({
 
             const currentUpdates = buildGenerationTaskNodeUpdates(nodesRef.current, task);
             if (Object.keys(currentUpdates).length === 0) return;
-            updates[task.nodeId] = {
-                ...currentUpdates[task.nodeId],
-                ...extraUpdates
-            };
+            setNodes(previous => applyMediaResultToCanvasNodes(previous, task.nodeId, task.output as MediaGenerationTaskOutput, {
+                expectedActiveTaskId: task.taskId,
+                lastTaskId: task.taskId,
+                extraUpdates
+            }).nodes);
+            return;
         }
         applyNodeUpdates(updates);
-    }, [applyNodeUpdates]);
+    }, [applyNodeUpdates, setNodes]);
 
     const loadingNodes = nodes.filter(node => node.status === NodeStatus.LOADING);
     const activeTaskIds = getUniqueActiveTaskIds(loadingNodes).sort();

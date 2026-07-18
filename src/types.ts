@@ -61,6 +61,7 @@ export interface NodeData {
   activeTaskId?: string; // Persisted task currently allowed to update this node
   lastTaskId?: string; // Most recent terminal task, used for linked retry
   generationProgress?: number; // 0-100 task progress for canvas feedback
+  generationProgressMessage?: string; // Short provider/task phase label for canvas feedback
   scriptData?: ScriptDocument;
   storyboardData?: StoryboardDocument;
 

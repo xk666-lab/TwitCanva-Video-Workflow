@@ -150,6 +150,44 @@ test('manager hashes, deduplicates, and persists a stubbed task execution', asyn
     assert.equal(completed.output.resultUrl, `/library/images/${first.task.taskId}.png`);
 });
 
+test('running task progress updates persist provider task metadata until completion', async t => {
+    const tasksDir = createTempTasksDir();
+    t.after(() => fs.rmSync(tasksDir, { recursive: true, force: true }));
+    let releaseExecution;
+    const executionGate = new Promise(resolve => { releaseExecution = resolve; });
+    const manager = createGenerationTaskManager({
+        tasksDir,
+        concurrency: 1,
+        executor: async (_task, onProgress) => {
+            onProgress({
+                providerTaskId: 'seedance-provider-task',
+                progress: 24,
+                progressMessage: 'Provider task created'
+            });
+            onProgress({ progress: 12, progressMessage: 'Older progress should not rewind' });
+            await executionGate;
+            return { resultUrl: '/library/videos/result.mp4' };
+        }
+    });
+    await manager.initialize();
+
+    const { task } = await manager.submitTask(createSubmission({
+        operation: 'generate-video',
+        provider: 'seedance',
+        model: 'bytedance/seedance-2.0/text-to-video'
+    }));
+    const running = await waitForStatus(manager, task.taskId, GenerationTaskStatus.RUNNING);
+    assert.equal(running.providerTaskId, 'seedance-provider-task');
+    assert.equal(running.progress, 24);
+    assert.equal(running.progressMessage, 'Older progress should not rewind');
+
+    releaseExecution();
+    const completed = await waitForStatus(manager, task.taskId, GenerationTaskStatus.SUCCEEDED);
+    assert.equal(completed.providerTaskId, 'seedance-provider-task');
+    assert.equal(completed.progress, 100);
+    assert.equal(completed.output.resultUrl, '/library/videos/result.mp4');
+});
+
 test('queue enforces concurrency and persists successful output', async t => {
     const tasksDir = createTempTasksDir();
     t.after(() => fs.rmSync(tasksDir, { recursive: true, force: true }));
@@ -306,6 +344,94 @@ test('restart marks interrupted running tasks retryable and resumes queued tasks
     assert.equal(interrupted.error.code, 'SERVER_RESTARTED');
     assert.equal(interrupted.error.retryable, true);
     await waitForStatus(manager, 'queued-task', GenerationTaskStatus.SUCCEEDED);
+});
+
+test('restart promotes a completed temp write when a task stalled before queueing', async t => {
+    const tasksDir = createTempTasksDir();
+    t.after(() => fs.rmSync(tasksDir, { recursive: true, force: true }));
+    const now = new Date().toISOString();
+    const baseTask = {
+        schemaVersion: 1,
+        taskId: 'stalled-before-queue',
+        workflowId: 'workflow-1',
+        nodeId: 'video-node',
+        operation: 'generate-video',
+        provider: 'seedance',
+        model: 'bytedance/seedance-2.0/text-to-video',
+        progress: 0,
+        inputSnapshot: { prompt: 'Render video' },
+        inputHash: 'b'.repeat(64),
+        parameters: {},
+        rootTaskId: 'stalled-before-queue',
+        attempt: 1,
+        createdAt: now
+    };
+    fs.writeFileSync(path.join(tasksDir, 'stalled-before-queue.json'), JSON.stringify({
+        ...baseTask,
+        status: GenerationTaskStatus.VALIDATING,
+        updatedAt: now
+    }));
+    fs.writeFileSync(path.join(tasksDir, 'stalled-before-queue.promote.tmp'), JSON.stringify({
+        ...baseTask,
+        status: GenerationTaskStatus.QUEUED,
+        updatedAt: new Date(Date.parse(now) + 1).toISOString()
+    }));
+
+    const manager = createGenerationTaskManager({
+        tasksDir,
+        concurrency: 1,
+        executor: async task => ({ resultUrl: `/library/videos/${task.taskId}.mp4` })
+    });
+    await manager.initialize();
+
+    const completed = await waitForStatus(manager, 'stalled-before-queue', GenerationTaskStatus.SUCCEEDED);
+    assert.equal(completed.output.resultUrl, '/library/videos/stalled-before-queue.mp4');
+    assert.equal(fs.readdirSync(tasksDir).some(file => file.endsWith('.tmp')), false);
+});
+
+test('stalled draft or validating tasks do not block a fresh duplicate submission', async t => {
+    const tasksDir = createTempTasksDir();
+    const originalRenameSync = fs.renameSync;
+    t.after(() => {
+        fs.renameSync = originalRenameSync;
+        fs.rmSync(tasksDir, { recursive: true, force: true });
+    });
+
+    let currentMs = Date.parse('2026-07-16T15:00:00.000Z');
+    let failedQueuedWrite = false;
+    fs.renameSync = (from, to) => {
+        const raw = fs.readFileSync(from, 'utf8');
+        if (!failedQueuedWrite && raw.includes(`"status": "${GenerationTaskStatus.QUEUED}"`)) {
+            failedQueuedWrite = true;
+            throw new Error('simulated queued persist failure');
+        }
+        return originalRenameSync(from, to);
+    };
+
+    const manager = createGenerationTaskManager({
+        tasksDir,
+        concurrency: 1,
+        now: () => new Date(currentMs).toISOString(),
+        executor: async task => ({ resultUrl: `/library/images/${task.taskId}.png` })
+    });
+    await manager.initialize();
+
+    await assert.rejects(
+        () => manager.submitTask(createSubmission()),
+        /simulated queued persist failure/
+    );
+    const stalledTask = JSON.parse(fs.readFileSync(
+        path.join(tasksDir, fs.readdirSync(tasksDir).find(file => file.endsWith('.json'))),
+        'utf8'
+    ));
+    assert.equal(stalledTask.status, GenerationTaskStatus.VALIDATING);
+
+    fs.renameSync = originalRenameSync;
+    currentMs += 31_000;
+    const fresh = await manager.submitTask(createSubmission());
+    assert.equal(fresh.reused, false);
+    assert.notEqual(fresh.task.taskId, stalledTask.taskId);
+    await waitForStatus(manager, fresh.task.taskId, GenerationTaskStatus.SUCCEEDED);
 });
 
 test('restart reconciles a running task when its media result was already saved', async t => {

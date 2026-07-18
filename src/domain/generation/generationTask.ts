@@ -44,6 +44,7 @@ export interface GenerationTask {
   model: string;
   status: GenerationTaskStatus;
   progress: number;
+  progressMessage?: string;
   inputSnapshot: unknown;
   inputHash: string;
   parameters: Record<string, unknown>;

@@ -106,6 +106,11 @@ export function InspectorPanel({
                   <p className="mt-1 truncate font-mono text-[10px]">{nodeData.lastTaskId || '无'}</p>
                 </div>
               </div>
+              {nodeData.generationProgressMessage && (
+                <p className={`mt-3 truncate rounded-lg border px-2.5 py-2 text-xs ${isDark ? 'border-cyan-300/20 bg-cyan-300/10 text-cyan-100' : 'border-cyan-200 bg-cyan-50 text-cyan-700'}`} title={nodeData.generationProgressMessage}>
+                  {nodeData.generationProgressMessage}
+                </p>
+              )}
               {nodeData.errorMessage && (
                 <p className={`mt-3 rounded-lg border px-2.5 py-2 text-xs ${isDark ? 'border-red-400/20 bg-red-400/10 text-red-200' : 'border-red-200 bg-red-50 text-red-700'}`}>
                   {nodeData.errorMessage}

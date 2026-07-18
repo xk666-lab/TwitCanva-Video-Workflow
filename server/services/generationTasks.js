@@ -28,6 +28,7 @@ const ACTIVE_STATUSES = new Set([
     GenerationTaskStatus.RUNNING
 ]);
 
+const PRE_QUEUE_STALL_TIMEOUT_MS = 30_000;
 const SAFE_TASK_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 const SENSITIVE_TASK_FIELD_PATTERN = /(api.?key|authorization|access.?key|secret.?key|bearer.?token)/i;
 
@@ -163,19 +164,79 @@ function writeTaskAtomic(tasksDir, task) {
     fs.renameSync(temporaryPath, targetPath);
 }
 
+function readTaskFile(filePath) {
+    const task = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    if (task && typeof task.taskId === 'string' && SAFE_TASK_ID_PATTERN.test(task.taskId)) {
+        return task;
+    }
+    return null;
+}
+
+function taskUpdatedMs(task) {
+    const timestamp = Date.parse(task?.updatedAt || task?.createdAt || '');
+    return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function normalizeProgress(progress) {
+    const numeric = Number(progress);
+    if (!Number.isFinite(numeric)) return undefined;
+    return Math.max(0, Math.min(100, Math.round(numeric)));
+}
+
+function canRecoverTemporaryTask(currentTask, temporaryTask) {
+    if (!currentTask || !temporaryTask) return false;
+    if (temporaryTask.taskId !== currentTask.taskId) return false;
+    if (!SAFE_TASK_ID_PATTERN.test(temporaryTask.taskId)) return false;
+    if (taskUpdatedMs(temporaryTask) < taskUpdatedMs(currentTask)) return false;
+    if (temporaryTask.status === currentTask.status) return true;
+    return isGenerationTaskTransitionAllowed(currentTask.status, temporaryTask.status);
+}
+
 function readPersistedTasks(tasksDir) {
     if (!fs.existsSync(tasksDir)) return [];
 
     const tasks = [];
+    const temporaryTasks = new Map();
+    for (const filename of fs.readdirSync(tasksDir)) {
+        if (!filename.endsWith('.tmp')) continue;
+        try {
+            const filePath = path.join(tasksDir, filename);
+            const task = readTaskFile(filePath);
+            if (!task) {
+                console.warn(`[GenerationTasks] Ignoring temp task file ${filename} with an unsafe or missing task id.`);
+                continue;
+            }
+            const current = temporaryTasks.get(task.taskId);
+            if (!current || taskUpdatedMs(task) >= taskUpdatedMs(current.task)) {
+                temporaryTasks.set(task.taskId, { task, filePath });
+            }
+        } catch (error) {
+            console.warn(`[GenerationTasks] Ignoring invalid temp task file ${filename}:`, error.message);
+        }
+    }
+
     for (const filename of fs.readdirSync(tasksDir)) {
         if (!filename.endsWith('.json')) continue;
         try {
-            const task = JSON.parse(fs.readFileSync(path.join(tasksDir, filename), 'utf8'));
-            if (task && typeof task.taskId === 'string' && SAFE_TASK_ID_PATTERN.test(task.taskId)) {
-                tasks.push(task);
-            } else {
+            let task = readTaskFile(path.join(tasksDir, filename));
+            if (!task) {
                 console.warn(`[GenerationTasks] Ignoring task file ${filename} with an unsafe or missing task id.`);
+                continue;
             }
+
+            const recovered = temporaryTasks.get(task.taskId);
+            if (recovered && canRecoverTemporaryTask(task, recovered.task)) {
+                task = recovered.task;
+                try {
+                    writeTaskAtomic(tasksDir, task);
+                    fs.rmSync(recovered.filePath, { force: true });
+                    console.warn(`[GenerationTasks] Recovered interrupted task write for ${task.taskId}.`);
+                } catch (error) {
+                    console.warn(`[GenerationTasks] Failed to promote temp task ${task.taskId}:`, error.message);
+                }
+            }
+
+            tasks.push(task);
         } catch (error) {
             console.warn(`[GenerationTasks] Ignoring invalid task file ${filename}:`, error.message);
         }
@@ -235,6 +296,46 @@ export function createGenerationTaskManager({
         return persist(next);
     }
 
+    function updateTaskProgress(taskId, updates = {}) {
+        const current = getStoredTask(taskId);
+        if (!current || current.status !== GenerationTaskStatus.RUNNING) return null;
+
+        const progress = normalizeProgress(updates.progress);
+        const nextProgress = progress === undefined
+            ? current.progress
+            : Math.max(Number(current.progress) || 0, progress);
+        return persist({
+            ...current,
+            ...(updates.providerTaskId ? { providerTaskId: String(updates.providerTaskId) } : {}),
+            ...(updates.progressMessage ? { progressMessage: String(updates.progressMessage) } : {}),
+            progress: nextProgress,
+            updatedAt: now()
+        });
+    }
+
+    function failStalledPreQueueTasks() {
+        const timestamp = now();
+        const currentMs = Date.parse(timestamp);
+        const cutoffMs = Number.isFinite(currentMs) ? currentMs - PRE_QUEUE_STALL_TIMEOUT_MS : Date.now() - PRE_QUEUE_STALL_TIMEOUT_MS;
+        for (const task of [...tasks.values()]) {
+            if (![GenerationTaskStatus.DRAFT, GenerationTaskStatus.VALIDATING].includes(task.status)) continue;
+            if (taskUpdatedMs(task) > cutoffMs) continue;
+            persist({
+                ...task,
+                status: GenerationTaskStatus.FAILED,
+                progress: 0,
+                error: {
+                    code: 'TASK_SUBMISSION_STALLED',
+                    message: 'The generation task stalled before it entered the execution queue.',
+                    retryable: true,
+                    recoverySuggestion: 'Retry the generation to submit a fresh task.'
+                },
+                completedAt: timestamp,
+                updatedAt: timestamp
+            });
+        }
+    }
+
     function schedulePump() {
         if (pumpScheduled) return;
         pumpScheduled = true;
@@ -257,7 +358,7 @@ export function createGenerationTaskManager({
 
         let execution;
         try {
-            execution = executor(cloneJson(runningTask));
+            execution = executor(cloneJson(runningTask), updates => updateTaskProgress(taskId, updates));
         } catch (error) {
             execution = Promise.reject(error);
         }
@@ -265,13 +366,14 @@ export function createGenerationTaskManager({
         Promise.resolve(execution)
             .then(output => {
                 const providerTaskId = output?.providerTaskId;
+                const latestTask = getStoredTask(taskId);
                 const normalizedOutput = output && typeof output === 'object'
                     ? Object.fromEntries(Object.entries(output).filter(([key]) => key !== 'providerTaskId'))
                     : output;
                 settleExecution(taskId, GenerationTaskStatus.SUCCEEDED, {
                     progress: 100,
                     output: cloneJson(normalizedOutput),
-                    providerTaskId: providerTaskId || runningTask.providerTaskId,
+                    providerTaskId: providerTaskId || latestTask?.providerTaskId || runningTask.providerTaskId,
                     error: undefined
                 });
             })
@@ -360,6 +462,8 @@ export function createGenerationTaskManager({
         const parameters = cloneJson(sanitizeTaskValue(submission.parameters || {}));
         const inputHash = hashGenerationTaskInput(inputSnapshot);
         const idempotencyKey = submission.idempotencyKey || undefined;
+
+        failStalledPreQueueTasks();
 
         if (idempotencyKey) {
             const idempotentTask = [...tasks.values()].find(task => task.idempotencyKey === idempotencyKey);
@@ -492,6 +596,7 @@ export function createGenerationTaskManager({
         retryTask,
         getTask,
         queryTasks,
-        waitForTask
+        waitForTask,
+        updateTaskProgress
     };
 }

@@ -100,6 +100,8 @@ test('template extraction preserves configuration but strips media, task, and ex
     lastFrame: '/library/images/last.png',
     activeTaskId: 'task-active',
     lastTaskId: 'task-last',
+    generationProgress: 24,
+    generationProgressMessage: 'Provider task created',
     errorMessage: 'old error',
     generationStartTime: 123,
     subjectAssetId: 'subject-1',
@@ -129,6 +131,8 @@ test('template extraction preserves configuration but strips media, task, and ex
   assert.equal(saved.lastFrame, undefined);
   assert.equal(saved.activeTaskId, undefined);
   assert.equal(saved.lastTaskId, undefined);
+  assert.equal(saved.generationProgress, undefined);
+  assert.equal(saved.generationProgressMessage, undefined);
   assert.equal(saved.errorMessage, undefined);
   assert.equal(saved.subjectAssetId, undefined);
   assert.equal(saved.characterReferenceUrls, undefined);

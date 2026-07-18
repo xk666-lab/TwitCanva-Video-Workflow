@@ -162,6 +162,65 @@ test('keeps polling after a transient status network failure', async () => {
     }
 });
 
+test('reports provider task progress while polling Seedance', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalInterval = process.env.SEEDANCE_POLL_INTERVAL_MS;
+    const originalTimeout = process.env.SEEDANCE_POLL_TIMEOUT_MS;
+    const progressEvents = [];
+    let statusCalls = 0;
+
+    process.env.SEEDANCE_POLL_INTERVAL_MS = '0';
+    process.env.SEEDANCE_POLL_TIMEOUT_MS = '1000';
+    globalThis.fetch = async (_url, options = {}) => {
+        if (options.method === 'POST') {
+            return new Response(JSON.stringify({ task_id: 'task-progress' }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+        statusCalls += 1;
+        if (statusCalls === 1) {
+            return new Response(JSON.stringify({ status: 'RUNNING' }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+        return new Response(JSON.stringify({
+            status: 'SUCCESS',
+            video_url: 'https://cdn.example.com/progress-result.mp4'
+        }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+        });
+    };
+
+    try {
+        const result = await generateSeedanceVideo({
+            prompt: 'A short camera move',
+            modelId: 'seedance-2.0',
+            resolution: '720p',
+            apiKey: 'test-key',
+            baseUrl: 'https://api.example.com',
+            onProgress: update => progressEvents.push(update)
+        });
+
+        assert.equal(result, 'https://cdn.example.com/progress-result.mp4');
+        assert.deepEqual(progressEvents[0], {
+            providerTaskId: 'task-progress',
+            progress: 5,
+            progressMessage: 'Provider task created'
+        });
+        assert.equal(progressEvents.some(update => update.providerTaskId === 'task-progress' && update.progressMessage === 'RUNNING'), true);
+        assert.equal(progressEvents.at(-1).progress, 95);
+    } finally {
+        globalThis.fetch = originalFetch;
+        if (originalInterval === undefined) delete process.env.SEEDANCE_POLL_INTERVAL_MS;
+        else process.env.SEEDANCE_POLL_INTERVAL_MS = originalInterval;
+        if (originalTimeout === undefined) delete process.env.SEEDANCE_POLL_TIMEOUT_MS;
+        else process.env.SEEDANCE_POLL_TIMEOUT_MS = originalTimeout;
+    }
+});
+
 test('keeps polling after a temporary provider 502 response', async () => {
     const originalFetch = globalThis.fetch;
     const originalInterval = process.env.SEEDANCE_POLL_INTERVAL_MS;

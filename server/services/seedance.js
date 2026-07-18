@@ -333,7 +333,7 @@ async function parseJsonResponse(response, label) {
     return raw;
 }
 
-async function pollSeedanceTask({ taskId, apiKey, baseUrl, statusPath, timeoutMs, intervalMs }) {
+async function pollSeedanceTask({ taskId, apiKey, baseUrl, statusPath, timeoutMs, intervalMs, onProgress }) {
     const startedAt = Date.now();
     let lastRaw = null;
     const path = statusPath || DEFAULT_STATUS_PATH;
@@ -372,9 +372,19 @@ async function pollSeedanceTask({ taskId, apiKey, baseUrl, statusPath, timeoutMs
         consecutiveNetworkFailures = 0;
         const raw = await parseJsonResponse(response, 'Seedance status');
         lastRaw = raw;
+        const elapsedMs = Date.now() - startedAt;
+        const estimatedProgress = Math.min(95, 10 + Math.floor((elapsedMs / Math.max(timeoutMs, 1)) * 85));
+        onProgress?.({
+            providerTaskId: taskId,
+            progress: estimatedProgress,
+            progressMessage: taskStatus(raw) || 'Provider response'
+        });
 
         const videoUrl = pickBestVideoUrl(collectVideoUrls(raw));
-        if (videoUrl) return videoUrl;
+        if (videoUrl) {
+            onProgress?.({ providerTaskId: taskId, progress: 95, progressMessage: 'Provider result ready' });
+            return videoUrl;
+        }
 
         const status = taskStatus(raw);
         if (isFailureStatus(status)) {
@@ -405,7 +415,8 @@ export async function generateSeedanceVideo({
     baseUrl,
     submitPath,
     statusPath,
-    assetStorage
+    assetStorage,
+    onProgress
 }) {
     if (!apiKey) {
         throw new Error('SEEDANCE_API_KEY is required');
@@ -471,13 +482,17 @@ export async function generateSeedanceVideo({
     const raw = await parseJsonResponse(response, 'Seedance submit');
 
     const videoUrl = pickBestVideoUrl(collectVideoUrls(raw));
-    if (videoUrl) return videoUrl;
+    if (videoUrl) {
+        onProgress?.({ progress: 95, progressMessage: 'Provider returned a direct video URL' });
+        return videoUrl;
+    }
 
     const taskId = extractTaskId(raw);
     if (!taskId) {
         throw new Error(`Seedance did not return a task id or video URL: ${JSON.stringify(raw).slice(0, 600)}`);
     }
     console.log(`[Seedance] Task created: ${taskId}`);
+    onProgress?.({ providerTaskId: taskId, progress: 5, progressMessage: 'Provider task created' });
 
     return await pollSeedanceTask({
         taskId,
@@ -485,6 +500,7 @@ export async function generateSeedanceVideo({
         baseUrl,
         statusPath,
         timeoutMs: Number(process.env.SEEDANCE_POLL_TIMEOUT_MS || 600000),
-        intervalMs: Number(process.env.SEEDANCE_POLL_INTERVAL_MS || 5000)
+        intervalMs: Number(process.env.SEEDANCE_POLL_INTERVAL_MS || 5000),
+        onProgress
     });
 }

@@ -326,6 +326,7 @@ export interface NodeInspectorData {
   };
   activeTaskId?: string;
   lastTaskId?: string;
+  generationProgressMessage?: string;
   errorMessage?: string;
 }
 
@@ -421,6 +422,7 @@ export function getNodeInspectorData(
     } : {}),
     ...(node.activeTaskId ? { activeTaskId: node.activeTaskId } : {}),
     ...(node.lastTaskId ? { lastTaskId: node.lastTaskId } : {}),
+    ...(node.generationProgressMessage ? { generationProgressMessage: node.generationProgressMessage } : {}),
     ...(node.errorMessage ? { errorMessage: node.errorMessage } : {})
   };
 }

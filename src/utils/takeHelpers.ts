@@ -186,6 +186,8 @@ export function buildGenerationSuccessUpdate(
     status: 'success' as NodeData['status'],
     resultUrl: result.resultUrl,
     errorMessage: undefined,
+    generationProgress: undefined,
+    generationProgressMessage: undefined,
     generationStartTime: undefined,
     ...extraUpdates
   };
